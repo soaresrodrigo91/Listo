@@ -64,6 +64,7 @@
   </div>
   <div class="field"><label>Nome</label><input id="cad-nome" type="text" autocomplete="given-name"></div>
   <div class="field"><label>Sobrenome</label><input id="cad-sobrenome" type="text" autocomplete="family-name"></div>
+  <div class="field"><label>Telefone</label><input id="cad-telefone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></div>
   <div class="field"><label>E-mail</label><input id="cad-email" type="email" autocomplete="username"></div>
   <div class="field"><label>Senha</label><input id="cad-senha" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
   <button class="btn" id="btn-criar-conta">Criar conta</button>
@@ -95,7 +96,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.10</div>
+      <div class="menu-versao" id="app-versao">01.16</div>
     </div>
   </aside>
 
@@ -135,7 +136,7 @@
           <span class="valor" id="dash-itens-pendentes">0</span>
         </div>
         <div class="card-resumo clicavel" id="card-lista-proxima">
-          <span class="rotulo"><span class="rotulo-icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg></span>Lembrete de Compras</span>
+          <span class="rotulo"><span class="rotulo-icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg></span>Lista (Pendente)</span>
           <div class="mini-carrossel" id="mini-carrossel-proxima"></div>
           <div class="mini-carrossel-pontos" id="mini-carrossel-pontos"></div>
         </div>
@@ -217,14 +218,31 @@
     </main>
   </div>
 
-  <!-- ---------- Item do catálogo (detalhe: info + histórico) ---------- -->
+  <!-- ---------- Item do catálogo (detalhe: cadastro + imagem + histórico) ---------- -->
   <div id="tela-item-detalhe" class="screen hidden">
     <main>
       <div class="tabs">
-        <button class="tab ativa" data-tab="info">Informações</button>
-        <button class="tab" data-tab="historico">Histórico de Preços</button>
+        <button class="tab ativa" data-tab="cadastro">Cadastro</button>
+        <button class="tab" data-tab="imagem">Imagem</button>
+        <button class="tab" data-tab="historico">Histórico</button>
       </div>
       <div id="item-detalhe-info" class="detalhe-lista"></div>
+      <div id="item-detalhe-imagem" class="hidden">
+        <div class="item-foto-linha">
+          <div class="item-foto-preview item-foto-preview-grande" id="det-foto-preview">📷</div>
+          <div class="item-foto-acoes">
+            <label class="link-foto">
+              <span id="det-label-foto-camera">Tirar foto</span>
+              <input type="file" accept="image/*" capture="environment" id="det-foto-input-camera" class="hidden">
+            </label>
+            <label class="link-foto">
+              <span id="det-label-foto-galeria">Enviar foto</span>
+              <input type="file" accept="image/*" id="det-foto-input-galeria" class="hidden">
+            </label>
+            <span class="link-foto hidden" id="btn-remover-foto-det" style="color:var(--danger)">Remover foto</span>
+          </div>
+        </div>
+      </div>
       <div id="item-detalhe-historico" class="hidden">
         <div class="grade-resumo" style="grid-template-columns: repeat(3, 1fr)">
           <div class="card-resumo"><span class="rotulo">Menor</span><span class="valor" id="hist-menor">—</span></div>
@@ -357,7 +375,6 @@
       <input type="hidden" id="fn-id">
       <div class="field"><label>Nome da lista *</label><input id="fn-nome" type="text" placeholder="Ex.: Compras do mês"></div>
       <div class="field" id="fn-data-wrap"><label>Data prevista da compra *</label><input id="fn-data" type="date"></div>
-      <label class="check-linha"><input type="checkbox" id="fn-permanente"> Lista permanente (contínua, sem data fixa)</label>
       <div class="field"><label>Observações</label><input id="fn-observacoes" type="text" placeholder="Opcional"></div>
       <div id="msg-form-lista"></div>
       <button class="btn" id="btn-salvar-lista">Salvar</button>
@@ -462,6 +479,15 @@
       <div id="msg-finalizar"></div>
       <button class="btn" id="btn-confirmar-finalizar">Finalizar</button>
       <button class="btn-secundario" id="btn-cancelar-finalizar">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- ---------- Modal: enviar item para uma lista pendente ---------- -->
+  <div class="overlay-mes hidden" id="overlay-enviar-lista">
+    <div class="cartao-mes">
+      <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Enviar para qual lista?</h3>
+      <div id="lista-opcoes-enviar"></div>
+      <button class="btn-secundario" id="btn-cancelar-enviar-lista">Cancelar</button>
     </div>
   </div>
 

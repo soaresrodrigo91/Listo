@@ -81,6 +81,11 @@ const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 /* ---------- estado ---------- */
 let auth = null, bd = null, usuario = null;
 let espacoIdAtual = null;
+// createUserWithEmailAndPassword dispara onAuthStateChanged antes mesmo de criarConta()
+// continuar — guarda os dados do formulário aqui para os dois lados da corrida (o listener
+// e o await explícito de criarConta) usarem o mesmo nome/sobrenome/telefone, não importa
+// qual dos dois "ganha" e efetivamente cria o usuário/espaço.
+let dadosCadastroPendente = null;
 let perfilAtual = { nome: "", sobrenome: "", telefone: "", fotoUrl: null, email: "" };
 let espacoAtual = { membros: [], membrosInfo: {} };
 let gruposAtuais = [], locaisAtuais = [], formasAtuais = [], itensAtuais = [], listasAtuais = [];
@@ -119,7 +124,7 @@ window.addEventListener("DOMContentLoaded", () => {
   onAuthStateChanged(auth, async (u) => {
     if (u) {
       usuario = u;
-      await garantirUsuarioEEspaco(u);
+      await garantirUsuarioEEspaco(u, dadosCadastroPendente?.nome, dadosCadastroPendente?.sobrenome, dadosCadastroPendente?.telefone);
       assinarUsuarioEEspaco(u.uid);
       assinarConvitesRecebidos();
       assinarNotificacoes();
@@ -209,6 +214,7 @@ async function esqueciSenha() {
 async function criarConta() {
   const nome = $("#cad-nome").value.trim();
   const sobrenome = $("#cad-sobrenome").value.trim();
+  const telefone = $("#cad-telefone").value.trim();
   const email = $("#cad-email").value.trim();
   const senha = $("#cad-senha").value;
   if (!nome || !email || senha.length < 6) {
@@ -217,10 +223,11 @@ async function criarConta() {
   }
   $("#btn-criar-conta").disabled = true;
   $("#btn-criar-conta").textContent = "Criando conta...";
+  dadosCadastroPendente = { nome, sobrenome, telefone };
   try {
     const credencial = await createUserWithEmailAndPassword(auth, email, senha);
     await updateProfile(credencial.user, { displayName: `${nome} ${sobrenome}`.trim() });
-    await garantirUsuarioEEspaco(credencial.user, nome, sobrenome);
+    await garantirUsuarioEEspaco(credencial.user, nome, sobrenome, telefone);
   } catch (e) {
     const mapa = {
       "auth/email-already-in-use": "Já existe uma conta com este e-mail.",
@@ -230,38 +237,78 @@ async function criarConta() {
     mostrarMsg("#msg-cadastro", mapa[e.code] || `Erro: ${e.code}`, "erro");
     $("#btn-criar-conta").disabled = false;
     $("#btn-criar-conta").textContent = "Criar conta";
+  } finally {
+    dadosCadastroPendente = null;
   }
 }
 
 /* ---------- usuário + espaço compartilhado ---------- */
-async function garantirUsuarioEEspaco(user, nomeCadastro, sobrenomeCadastro) {
-  const refUsuario = doc(bd, "usuarios", user.uid);
-  const snap = await getDoc(refUsuario);
-  if (snap.exists()) {
-    espacoIdAtual = snap.data().espacoId;
-    return;
+// Evita que a chamada explícita do cadastro (criarConta) e a chamada automática do
+// onAuthStateChanged (disparada pelo próprio createUserWithEmailAndPassword) rodem em
+// paralelo e cheguem juntas no getDoc abaixo antes de qualquer uma escrever — a segunda
+// chamada concorrente simplesmente aguarda a mesma promessa em vez de duplicar o trabalho.
+let promessaGarantirUsuario = null;
+
+async function garantirUsuarioEEspaco(user, nomeCadastro, sobrenomeCadastro, telefoneCadastro) {
+  if (promessaGarantirUsuario) return promessaGarantirUsuario;
+  promessaGarantirUsuario = (async () => {
+    const refUsuario = doc(bd, "usuarios", user.uid);
+    const snap = await getDoc(refUsuario);
+    if (snap.exists()) {
+      espacoIdAtual = snap.data().espacoId;
+      return;
+    }
+
+    const nome = nomeCadastro ?? (user.displayName || "");
+    const email = normalizarEmail(user.email || "");
+    const refEspaco = await addDoc(collection(bd, "espacos"), {
+      criadoPor: user.uid,
+      criadoEm: serverTimestamp(),
+      membros: [user.uid],
+      membrosInfo: { [user.uid]: { nome, email } },
+    });
+
+    await Promise.all([
+      setDoc(refUsuario, {
+        nome, sobrenome: sobrenomeCadastro ?? "", telefone: telefoneCadastro ?? "", fotoUrl: null, email,
+        espacoId: refEspaco.id, criadoEm: serverTimestamp(),
+      }),
+      setDoc(doc(bd, "indiceEmails", email), { uid: user.uid }),
+      ...GRUPOS_PADRAO.map((g) => addDoc(collection(bd, "espacos", refEspaco.id, "grupos"), g)),
+      ...LOCAIS_PADRAO.map((l) => addDoc(collection(bd, "espacos", refEspaco.id, "locais"), l)),
+      ...FORMAS_PADRAO.map((f) => addDoc(collection(bd, "espacos", refEspaco.id, "formasPagamento"), f)),
+    ]);
+    espacoIdAtual = refEspaco.id;
+  })();
+  try {
+    await promessaGarantirUsuario;
+  } finally {
+    promessaGarantirUsuario = null;
   }
+}
 
-  const nome = nomeCadastro ?? (user.displayName || "");
-  const email = normalizarEmail(user.email || "");
-  const refEspaco = await addDoc(collection(bd, "espacos"), {
-    criadoPor: user.uid,
-    criadoEm: serverTimestamp(),
-    membros: [user.uid],
-    membrosInfo: { [user.uid]: { nome, email } },
-  });
+// Rede de segurança: se por qualquer motivo o espaço do próprio criador ficar sem
+// grupos/locais/formas (ex.: falha de rede no meio do cadastro), semeia os padrões
+// assim que detectar as coleções vazias — garante que todo usuário que se cadastrar
+// sempre acabe com os cadastros padrão, mesmo que o seeding original tenha falhado.
+async function garantirCatalogoSemeado(espacoId) {
+  try {
+    const espacoSnap = await getDoc(doc(bd, "espacos", espacoId));
+    if (!espacoSnap.exists() || espacoSnap.data().criadoPor !== usuario?.uid) return;
 
-  await Promise.all([
-    setDoc(refUsuario, {
-      nome, sobrenome: sobrenomeCadastro ?? "", telefone: "", fotoUrl: null, email,
-      espacoId: refEspaco.id, criadoEm: serverTimestamp(),
-    }),
-    setDoc(doc(bd, "indiceEmails", email), { uid: user.uid }),
-    ...GRUPOS_PADRAO.map((g) => addDoc(collection(bd, "espacos", refEspaco.id, "grupos"), g)),
-    ...LOCAIS_PADRAO.map((l) => addDoc(collection(bd, "espacos", refEspaco.id, "locais"), l)),
-    ...FORMAS_PADRAO.map((f) => addDoc(collection(bd, "espacos", refEspaco.id, "formasPagamento"), f)),
-  ]);
-  espacoIdAtual = refEspaco.id;
+    const [gruposSnap, locaisSnap, formasSnap] = await Promise.all([
+      getDocs(collection(bd, "espacos", espacoId, "grupos")),
+      getDocs(collection(bd, "espacos", espacoId, "locais")),
+      getDocs(collection(bd, "espacos", espacoId, "formasPagamento")),
+    ]);
+    await Promise.all([
+      gruposSnap.empty ? Promise.all(GRUPOS_PADRAO.map((g) => addDoc(collection(bd, "espacos", espacoId, "grupos"), g))) : null,
+      locaisSnap.empty ? Promise.all(LOCAIS_PADRAO.map((l) => addDoc(collection(bd, "espacos", espacoId, "locais"), l))) : null,
+      formasSnap.empty ? Promise.all(FORMAS_PADRAO.map((f) => addDoc(collection(bd, "espacos", espacoId, "formasPagamento"), f))) : null,
+    ]);
+  } catch (e) {
+    console.error("garantirCatalogoSemeado falhou:", e);
+  }
 }
 
 function assinarUsuarioEEspaco(uid) {
@@ -284,6 +331,7 @@ function assinarUsuarioEEspaco(uid) {
 
 function reconectarEspaco(espacoId) {
   [unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubItens, unsubListas].forEach((u) => u && u());
+  garantirCatalogoSemeado(espacoId);
 
   unsubEspacoDoc = onSnapshot(doc(bd, "espacos", espacoId), (snap) => {
     espacoAtual = snap.data() || { membros: [], membrosInfo: {} };
@@ -351,7 +399,6 @@ async function salvarPerfil() {
   try {
     await updateDoc(doc(bd, "usuarios", usuario.uid), { nome, sobrenome, telefone });
     exibirSucesso("Perfil salvo com sucesso!");
-    irParaTela(telaAnterior);
   } catch {
     mostrarMsg("#msg-perfil", "Não foi possível salvar. Tente novamente.", "erro");
   }
@@ -393,10 +440,11 @@ async function alterarSenha() {
   }
   $("#btn-salvar-seguranca").disabled = false;
 }
-async function redimensionarFotoPerfil(arquivo) {
+// Sem Firebase Storage no projeto — fotos são redimensionadas no navegador e guardadas
+// como data URL (base64) direto no documento do Firestore, igual à foto de perfil.
+async function redimensionarImagem(arquivo, tamanhoMax) {
   const bitmap = await createImageBitmap(arquivo);
-  const TAMANHO_MAX = 256;
-  const escala = Math.min(1, TAMANHO_MAX / Math.max(bitmap.width, bitmap.height));
+  const escala = Math.min(1, tamanhoMax / Math.max(bitmap.width, bitmap.height));
   const largura = Math.round(bitmap.width * escala);
   const altura = Math.round(bitmap.height * escala);
   const canvas = document.createElement("canvas");
@@ -409,7 +457,7 @@ async function salvarFotoPerfil(arquivo) {
   const texto = $("#pf-label-foto-texto");
   texto.textContent = "Enviando...";
   try {
-    const dataUrl = await redimensionarFotoPerfil(arquivo);
+    const dataUrl = await redimensionarImagem(arquivo, 256);
     await updateDoc(doc(bd, "usuarios", usuario.uid), { fotoUrl: dataUrl });
   } catch {
     mostrarMsg("#msg-perfil", "Não foi possível enviar a foto. Tente novamente.", "erro");
@@ -575,7 +623,6 @@ function abrirFormNovaLista() {
   $("#fn-id").value = "";
   $("#fn-nome").value = "";
   $("#fn-data").value = "";
-  $("#fn-permanente").checked = false;
   $("#fn-data-wrap").classList.remove("hidden");
   $("#fn-observacoes").value = "";
   $("#btn-excluir-lista").classList.add("hidden");
@@ -587,7 +634,8 @@ function abrirFormEditarLista(lista) {
   $("#fn-id").value = lista.id;
   $("#fn-nome").value = lista.nome;
   $("#fn-data").value = lista.dataPrevista || "";
-  $("#fn-permanente").checked = !!lista.permanente;
+  // Lista permanente é um modelo legado (opção removida do formulário) — se a lista editada
+  // já for permanente, mantém o campo de data oculto e preserva a flag ao salvar.
   $("#fn-data-wrap").classList.toggle("hidden", !!lista.permanente);
   $("#fn-observacoes").value = lista.observacoes || "";
   $("#btn-excluir-lista").classList.remove("hidden");
@@ -597,7 +645,7 @@ function abrirFormEditarLista(lista) {
 async function salvarLista() {
   const id = $("#fn-id").value;
   const nome = $("#fn-nome").value.trim();
-  const permanente = $("#fn-permanente").checked;
+  const permanente = id ? !!listasAtuais.find((l) => l.id === id)?.permanente : false;
   const dataPrevista = permanente ? null : $("#fn-data").value;
   const observacoes = $("#fn-observacoes").value.trim() || null;
   if (!nome || (!permanente && !dataPrevista)) {
@@ -778,14 +826,14 @@ async function adicionarItemNaLista() {
 // Busca os itens direto do servidor (getDocs) em vez de usar itensListaAtuais: logo após um
 // addDoc/updateDoc/deleteDoc, o listener onSnapshot pode ainda não ter atualizado o cache local,
 // e os totais ficariam errados se lêssemos o array em memória nesse instante.
-async function recalcularTotaisLista() {
-  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"));
+async function recalcularTotaisLista(listaId = listaAbertaId) {
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"));
   const itens = snap.docs.map((d) => d.data());
   const qtdItens = itens.length;
   const qtdComprados = itens.filter((i) => i.comprado).length;
   const valorProvisionadoTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   const status = qtdComprados === 0 ? "pendente" : qtdComprados === qtdItens && qtdItens > 0 ? "comprada" : "parcial";
-  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), { qtdItens, qtdComprados, valorProvisionadoTotal, status });
+  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaId), { qtdItens, qtdComprados, valorProvisionadoTotal, status });
 }
 
 /* ---------- marcar item como comprado (modal local + valor) ---------- */
@@ -881,17 +929,77 @@ function renderCadastroItens() {
         <div class="nome">${esc(i.nome)}</div>
         <div class="detalhe"><span>${esc(i.grupoNome || "Sem grupo")}</span><span>· ${esc(i.unidade)}</span>${i.marca ? `<span>· ${esc(i.marca)}</span>` : ""}</div>
       </div>
+      <button class="btn-enviar-lista" data-id-enviar="${i.id}" aria-label="Enviar para lista pendente" title="Enviar para lista pendente">🛒</button>
     </div>`)
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirItemDetalhe(itensAtuais.find((i) => i.id === el.dataset.id));
   });
+  container.querySelectorAll(".btn-enviar-lista").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      abrirPickerEnviarLista(itensAtuais.find((i) => i.id === btn.dataset.idEnviar));
+    };
+  });
+}
+
+// Picker de "enviar item direto para uma lista pendente" a partir do catálogo (tela Itens) —
+// sempre pergunta qual lista quando há mais de uma pendente, nunca escolhe uma automaticamente.
+function abrirPickerEnviarLista(item) {
+  if (!item) return;
+  const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
+  const container = $("#lista-opcoes-enviar");
+  if (pendentes.length === 0) {
+    container.innerHTML = `<div class="vazio">Nenhuma lista pendente. Crie uma lista primeiro.</div>`;
+  } else {
+    container.innerHTML = pendentes
+      .map((l) => `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}${l.dataPrevista ? ` · ${formatarDataBR(l.dataPrevista)}` : ""}</button>`)
+      .join("");
+    container.querySelectorAll(".opcao-lista-enviar").forEach((btn) => {
+      btn.onclick = () => enviarItemParaLista(item, btn.dataset.listaId);
+    });
+  }
+  $("#overlay-enviar-lista").classList.remove("hidden");
+}
+function fecharPickerEnviarLista() {
+  $("#overlay-enviar-lista").classList.add("hidden");
+}
+async function enviarItemParaLista(item, listaId) {
+  const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
+  await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
+    itemId: item.id, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
+    quantidade: 1, valorProvisionado: 0, subtotal: 0,
+    comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
+    adicionadoPor: usuario.uid, adicionadoPorNome,
+  });
+  await recalcularTotaisLista(listaId);
+  fecharPickerEnviarLista();
+  exibirSucesso("Item enviado para a lista!");
+}
+
+function renderImagemItemDetalhe(fotoUrl) {
+  $("#det-foto-preview").innerHTML = fotoUrl ? `<img src="${fotoUrl}" alt="Foto do item">` : "📷";
+  $("#btn-remover-foto-det").classList.toggle("hidden", !fotoUrl);
+}
+async function salvarFotoItemDetalhe(arquivo, labelId) {
+  if (!itemCatalogoAbertoId) return;
+  const label = $(labelId);
+  const textoOriginal = label.textContent;
+  label.textContent = "Enviando...";
+  try {
+    const dataUrl = await redimensionarImagem(arquivo, 480);
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", itemCatalogoAbertoId), { fotoUrl: dataUrl });
+    renderImagemItemDetalhe(dataUrl);
+  } catch {
+    mostrarMsg("#msg-form-item", "Não foi possível enviar a foto. Tente novamente.", "erro");
+  }
+  label.textContent = textoOriginal;
 }
 
 async function abrirItemDetalhe(item) {
   itemCatalogoAbertoId = item.id;
   telaAnterior = "cadastro-itens";
-  $(".tab[data-tab='info']").click();
+  $(".tab[data-tab='cadastro']").click();
   $("#item-detalhe-info").innerHTML =
     [
       ["Nome", item.nome],
@@ -902,7 +1010,17 @@ async function abrirItemDetalhe(item) {
     ].map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
     `<button class="btn-secundario" id="btn-editar-item-catalogo" style="margin-top:14px">✏️ Editar item</button>`;
   $("#btn-editar-item-catalogo").onclick = () => abrirFormEditarItem(item);
+  renderImagemItemDetalhe(item.fotoUrl || null);
 
+  await renderHistoricoItem(item);
+
+  mostrarTelaCheia("item-detalhe", item.nome);
+}
+
+// Exibida na aba "Histórico de Preços" do item: reduzida a 1 linha por local (a mais
+// recente), mas o botão de excluir apaga TODOS os registros daquele item+local — senão o
+// registro mais antigo simplesmente reapareceria no lugar do que acabou de ser removido.
+async function renderHistoricoItem(item) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
   historicoAtual = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   // Dashboards e listagens sempre usam o último valor informado por local — se o mesmo item foi
@@ -917,10 +1035,21 @@ async function abrirItemDetalhe(item) {
         <span class="local">${esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span>
         <span class="valor">${formatarMoeda(h.valor)}</span>
         <span class="data">${formatarDataBR(h.data)}</span>
+        <button class="btn-excluir-historico" data-local-id="${h.localId}" aria-label="Excluir registro">🗑️</button>
       </div>`).join("")
     : `<div class="vazio">Nenhuma compra registrada ainda para este item.</div>`;
 
-  mostrarTelaCheia("item-detalhe", item.nome);
+  $("#tabela-historico").querySelectorAll(".btn-excluir-historico").forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm("Excluir o histórico de preço deste item neste local?")) return;
+      btn.disabled = true;
+      const localId = btn.dataset.localId;
+      const registros = historicoAtual.filter((h) => h.localId === localId);
+      await Promise.all(registros.map((h) => deleteDoc(doc(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos", h.id))));
+      exibirSucesso("Histórico excluído!");
+      renderHistoricoItem(item);
+    };
+  });
 }
 
 function abrirFormNovoItem() {
@@ -1567,34 +1696,28 @@ const ONBOARDING_PASSOS = [
   {
     icone: "🛒",
     titulo: "Bem-vindo(a) ao Listo!",
-    corpo: "Este é o seu <b>espaço de compras</b>: tudo o que você cadastrar aqui — itens, grupos, locais e listas — pode ser compartilhado com quem você convidar, em tempo real.",
+    corpo: "Seu <b>espaço de compras</b>: tudo que você cadastrar pode ser compartilhado com quem você convidar.",
   },
   {
     icone: "📦",
     titulo: "Comece pelos cadastros",
-    corpo: "No menu lateral você encontra <b>Itens, Grupos, Locais</b> e <b>Formas de Pagamento</b>. Alguns exemplos já vêm prontos — edite, remova ou adicione os seus antes de montar a primeira lista.",
+    corpo: "No menu, cadastre <b>Itens, Grupos, Locais</b> e <b>Formas de Pagamento</b>. Alguns exemplos já vêm prontos.",
   },
   {
     icone: "📋",
     titulo: "Monte sua lista",
-    corpo: "Crie uma lista, adicione itens do catálogo com quantidade e valor previsto. Ao marcar um item como <b>comprado</b>, o app pede o local e o valor pago — isso alimenta automaticamente o histórico de preços do item.",
+    corpo: "O item do catálogo não tem preço fixo — quantidade e valor são informados <b>na lista</b>. Ao marcar como comprado, informe o local e o valor pago: isso vira histórico de preços.",
   },
   {
     icone: "👥",
     titulo: "Compartilhe com alguém",
-    corpo: "Em <b>Listas Compartilhadas</b>, convide alguém pelo e-mail. Ao aceitar, essa pessoa passa a ver as mesmas listas, itens, grupos e locais que você — sincronizado na hora.",
+    corpo: "Convide pelo e-mail em <b>Listas Compartilhadas</b>. Ao aceitar, vocês passam a ver tudo juntos, em tempo real.",
   },
   {
     icone: "📲",
     titulo: "Adicione à tela de início (iPhone)",
-    corpo: `Para abrir como um aplicativo instalado, sem precisar do navegador:
-      <ol>
-        <li>Abra este endereço no <b>Safari</b>.</li>
-        <li>Toque no ícone de compartilhamento (quadrado com seta para cima).</li>
-        <li>Toque em <b>"Adicionar à Tela de Início"</b>.</li>
-        <li>Toque em <b>Adicionar</b>, no canto superior direito.</li>
-      </ol>
-      No Android, use o menu ⋮ do Chrome e toque em "Adicionar à tela inicial".`,
+    corpo: `No Safari: toque em compartilhar <b>→</b> "Adicionar à Tela de Início" <b>→</b> Adicionar.
+      No Android: menu ⋮ do Chrome → "Adicionar à tela inicial".`,
   },
 ];
 let onboardingPassoAtual = 0;
@@ -1695,7 +1818,6 @@ function ligarEventos() {
   $("#btn-salvar-lista").onclick = salvarLista;
   $("#btn-excluir-lista").onclick = excluirListaAtual;
   $("#btn-cancelar-lista").onclick = () => irParaTela(telaAnterior);
-  $("#fn-permanente").addEventListener("change", (e) => $("#fn-data-wrap").classList.toggle("hidden", e.target.checked));
 
   $("#ld-item-nome").addEventListener("input", (e) => {
     $("#ld-item-id").value = "";
@@ -1721,7 +1843,8 @@ function ligarEventos() {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.onclick = () => {
       document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("ativa", t === tab));
-      $("#item-detalhe-info").classList.toggle("hidden", tab.dataset.tab !== "info");
+      $("#item-detalhe-info").classList.toggle("hidden", tab.dataset.tab !== "cadastro");
+      $("#item-detalhe-imagem").classList.toggle("hidden", tab.dataset.tab !== "imagem");
       $("#item-detalhe-historico").classList.toggle("hidden", tab.dataset.tab !== "historico");
     };
   });
@@ -1758,7 +1881,16 @@ function ligarEventos() {
   $("#btn-salvar-seguranca").onclick = alterarSenha;
   $("#btn-cancelar-perfil").onclick = () => irParaTela(telaAnterior);
   $("#pf-telefone").addEventListener("input", (e) => { e.target.value = formatarTelefone(e.target.value); });
+  $("#cad-telefone").addEventListener("input", (e) => { e.target.value = formatarTelefone(e.target.value); });
   $("#pf-foto-input").addEventListener("change", (e) => { const a = e.target.files?.[0]; if (a) salvarFotoPerfil(a); });
+  $("#det-foto-input-camera").addEventListener("change", (e) => { const a = e.target.files?.[0]; if (a) salvarFotoItemDetalhe(a, "#det-label-foto-camera"); e.target.value = ""; });
+  $("#det-foto-input-galeria").addEventListener("change", (e) => { const a = e.target.files?.[0]; if (a) salvarFotoItemDetalhe(a, "#det-label-foto-galeria"); e.target.value = ""; });
+  $("#btn-remover-foto-det").addEventListener("click", async () => {
+    if (!itemCatalogoAbertoId) return;
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", itemCatalogoAbertoId), { fotoUrl: null });
+    renderImagemItemDetalhe(null);
+  });
+  $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
 
   const chaveTema = $("#chave-tema-escuro");
   const temaEscuroSalvo = document.documentElement.getAttribute("data-tema") === "escuro";

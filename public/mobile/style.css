@@ -536,6 +536,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 2px 4px 8px 22px;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--borda-glass);
 }
 .menu-item {
   display: flex;
@@ -550,7 +553,12 @@ textarea {
   transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
 }
 .menu-item.menu-sub {
-  padding-left: 20px;
+  padding: 9px 10px;
+  font-size: 12.5px;
+  border-radius: 10px;
+}
+.menu-item.menu-sub .icone {
+  width: 18px;
   font-size: 13px;
 }
 .menu-item:active {
@@ -1165,6 +1173,19 @@ main::-webkit-scrollbar {
 .btn-excluir-linha:active {
   background: var(--bg-soft);
 }
+.btn-enviar-lista {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.btn-enviar-lista:active {
+  transform: scale(0.9);
+}
 
 /* ---------- formulário rápido "adicionar item" na lista ---------- */
 .field-adicionar-item {
@@ -1303,6 +1324,17 @@ main::-webkit-scrollbar {
 .linha-historico .data {
   color: var(--muted);
   font-size: 12px;
+}
+.btn-excluir-historico {
+  margin-left: 10px;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.btn-excluir-historico:active {
+  opacity: 1;
+  transform: scale(0.92);
 }
 
 /* ---------- fab ---------- */
@@ -1469,6 +1501,50 @@ main::-webkit-scrollbar {
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
+}
+
+.item-foto-linha {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.item-foto-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  background: var(--card-bg, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--borda-glass);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.item-foto-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.item-foto-preview-grande {
+  width: 140px;
+  height: 140px;
+  font-size: 36px;
+}
+.item-foto-acoes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.item-foto-acoes .link-foto {
+  cursor: pointer;
+}
+.item-detalhe-foto {
+  width: 100%;
+  max-width: 260px;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  display: block;
 }
 
 .carregando-tela {

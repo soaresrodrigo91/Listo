@@ -52,6 +52,7 @@ espacos/{espacoId}
 
   itens/{itemId}                       // catálogo único de produtos
     nome, descricao, marca, grupoId, unidade
+    fotoUrl                            // data URL (base64), opcional — sem Firebase Storage
     // Sem valor de referência no cadastro — o preço só existe depois de uma compra real
     // registrada numa lista (ver historicoPrecos abaixo); "quanto custa" é sempre por local.
     historicoPrecos/{registroId}       // 1 registro por compra confirmada
@@ -59,7 +60,8 @@ espacos/{espacoId}
 
   listas/{listaId}
     nome, dataPrevista, observacoes
-    permanente: boolean                // lista contínua, sem data de finalização fixa
+    permanente: boolean                // lista contínua, sem data de finalização fixa — modelo legado,
+                                        // não há mais opção no formulário para criar uma nova assim
     status: "pendente" | "parcial" | "comprada"
     qtdItens, qtdComprados, valorProvisionadoTotal   // agregados, recalculados a cada alteração de item
     criadoPor, criadoEm
@@ -101,6 +103,7 @@ notificacoes/{id}                              // aparecem no sino do topbar
 6. **Marcar item como comprado exige, antes de permitir o check:** local de compra e valor pago. Ao confirmar, grava `comprado: true`, `localCompraId`, `valorPago`, `compradoPor`, `compradoEm` **e** cria um registro em `itens/{itemId}/historicoPrecos` (local, valor, data, listaId de origem) — é assim que o histórico de preços por estabelecimento é alimentado. Desmarcar limpa os campos de compra do item, mas não apaga o histórico já registrado.
 7. **Comparador de preços** (aba dentro do item do catálogo): lê `historicoPrecos` do item, mas primeiro reduz a **um registro por local** (o mais recente por data, quando o mesmo item foi comprado no mesmo local mais de uma vez com valores diferentes) — é sobre esse conjunto reduzido que calcula menor/maior/média e monta a tabela local × valor × data. O histórico bruto (todas as compras) continua gravado no Firestore, só não é somado/mostrado duplicado.
 8. Essa mesma regra de "só o valor mais recente por local" vale para os dashboards **Locais com preços mais baratos** e **Itens mais baratos aqui** (tela de Locais).
+8.1. O usuário pode excluir, a qualquer momento, o histórico de preços de um item num local específico (aba "Histórico de Preços" do item) — a exclusão remove todos os registros daquele item+local, não só o mais recente exibido.
 9. **Finalização da compra:** quando todos os itens de uma lista não-permanente são marcados, o app oferece finalizar — solicita forma de pagamento, parcelamento (se crédito) e valor total pago, grava em campos da lista e marca `status: "comprada"`.
 10. **Lista permanente:** uma lista com `permanente: true` nunca é "finalizada" automaticamente; o usuário vai adicionando itens ao longo do tempo e finaliza manualmente quando quiser (equivalente a uma lista contínua da semana).
 11. **Compartilhamento:** ver seção 2. Convite por e-mail com ID determinístico `convites/{espacoId}_{emailNormalizado}`, aceitar/recusar, mesmo padrão usado no financeiro (índice de e-mails + get() nas rules).
@@ -111,7 +114,8 @@ notificacoes/{id}                              // aparecem no sino do topbar
 2. **Início** — saudação ("Olá, {nome}! Vamos organizar sua próxima compra?"), dashboard (cards: valor provisionado das listas pendentes, quantidade de itens pendentes, lista mais próxima da data de compra) e gráficos (itens mais comprados, grupos mais utilizados, locais mais utilizados). FAB com speed-dial: Novo Item / Nova Lista.
 3. **Listas** — carrossel de cards (título, data prevista, observação, valor provisionado, quantidade de itens, status colorido).
 4. **Lista (detalhe)** — formulário de itens (adicionar do catálogo, quantidade, valor provisionado, subtotal), checkbox por item (abre modal obrigatório de local + valor antes de marcar), totais em tempo real, botão finalizar quando aplicável.
-5. **Item do catálogo (detalhe)** — dados cadastrais + aba "Histórico de Preços" (tabela local/valor/data + menor/maior/média).
+5. **Item do catálogo (detalhe)** — 3 abas: **Cadastro** (dados cadastrais), **Imagem** (foto do item — tirar/enviar/remover direto por aqui, sem precisar abrir "Editar item") e **Histórico** (tabela local/valor/data + menor/maior/média).
+5.1. **Enviar item para lista pendente** — na tela de Itens (Cadastros), cada item tem um atalho para enviar direto a uma lista pendente; se houver mais de uma pendente, o app sempre pergunta qual (nunca escolhe sozinho).
 6. **Cadastros** — Itens, Grupos, Locais, Formas de Pagamento (listas simples + formulário).
 7. **Listas Compartilhadas** — convidar por e-mail, ver membros do espaço, aceitar/recusar convites recebidos.
 8. **Perfil** — foto, nome, sobrenome, telefone, e-mail.
