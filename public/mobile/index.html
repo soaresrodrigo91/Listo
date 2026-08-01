@@ -97,7 +97,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.20</div>
+      <div class="menu-versao" id="app-versao">01.21</div>
     </div>
   </aside>
 
@@ -189,9 +189,9 @@
 
   <!-- ---------- Lista (detalhe) ---------- -->
   <div id="tela-lista-detalhe" class="screen hidden">
-    <div class="cabecalho-fixo">
+    <div class="cabecalho-fixo" style="position:relative">
       <div id="lista-detalhe-cabecalho"></div>
-      <button class="btn-secundario" id="btn-compartilhar-lista" style="width:auto;padding:8px 14px;margin:0 16px 10px;display:flex;align-items:center;gap:8px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg>Compartilhar no WhatsApp</button>
+      <button class="btn-compartilhar-mini" id="btn-compartilhar-lista" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
       <div class="filtros-chip" id="filtros-lista-grupo"></div>
       <div class="filtros-chip" id="filtros-lista-local"></div>
     </div>
@@ -206,10 +206,7 @@
           </div>
           <div class="field"><label>Qtd.</label><input id="ld-quantidade" type="number" min="0.01" step="0.01" inputmode="decimal" value="1"></div>
         </div>
-        <div class="linha-dupla">
-          <div class="field"><label>Valor provisionado</label><input id="ld-valor" type="text" inputmode="decimal" placeholder="0,00"></div>
-          <div class="field"><label>Unidade</label><input id="ld-unidade" type="text" disabled></div>
-        </div>
+        <div class="field"><label>Unidade</label><input id="ld-unidade" type="text" disabled></div>
         <button class="btn-secundario" id="btn-adicionar-item-lista">+ Adicionar item</button>
       </div>
 

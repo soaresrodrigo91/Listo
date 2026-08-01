@@ -677,6 +677,22 @@ textarea {
   font-weight: 700;
   font-size: 20px;
   margin: 4px 2px 14px;
+  padding-right: 40px;
+}
+.btn-compartilhar-mini {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--bg-soft);
+}
+.btn-compartilhar-mini:active {
+  transform: scale(0.92);
 }
 
 /* ---------- modal genérico (comprar item / finalizar compra) ---------- */

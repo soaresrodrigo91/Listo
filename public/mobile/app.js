@@ -734,7 +734,6 @@ function abrirListaDetalhe(lista) {
   $("#ld-item-nome").value = "";
   $("#ld-item-id").value = "";
   $("#ld-item-sugestoes").classList.add("hidden");
-  $("#ld-valor").value = "";
   $("#ld-unidade").value = "";
 }
 
@@ -820,6 +819,15 @@ function renderListaDetalhe() {
   $("#btn-finalizar-compra").classList.toggle("hidden", !(todosComprados && !lista.permanente && !lista.finalizadaEm));
 }
 
+// Sem campo manual de valor provisionado: usa o preço mais recente já registrado pra esse
+// item (qualquer local) como estimativa — se nunca foi comprado, fica em 0 até a 1ª compra.
+async function ultimoValorConhecido(itemId) {
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", itemId, "historicoPrecos"));
+  if (snap.empty) return 0;
+  const maisRecente = snap.docs.map((d) => d.data()).sort((a, b) => b.data.localeCompare(a.data))[0];
+  return maisRecente.valor || 0;
+}
+
 async function adicionarItemNaLista() {
   const itemId = $("#ld-item-id").value;
   const item = itensAtuais.find((i) => i.id === itemId);
@@ -830,7 +838,7 @@ async function adicionarItemNaLista() {
   // Campo nativo type="number": .value já vem com ponto decimal (não vírgula), então lê direto
   // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
   const quantidade = Number($("#ld-quantidade").value) || 1;
-  const valorProvisionado = paraNumero($("#ld-valor").value);
+  const valorProvisionado = await ultimoValorConhecido(itemId);
   const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
     itemId, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
@@ -843,7 +851,6 @@ async function adicionarItemNaLista() {
   $("#ld-item-id").value = "";
   $("#ld-unidade").value = "";
   $("#ld-quantidade").value = "1";
-  $("#ld-valor").value = "";
   exibirSucesso("Item adicionado à lista!");
 }
 
@@ -990,9 +997,10 @@ function fecharPickerEnviarLista() {
 }
 async function enviarItemParaLista(item, listaId) {
   const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
+  const valorProvisionado = await ultimoValorConhecido(item.id);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
     itemId: item.id, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
-    quantidade: 1, valorProvisionado: 0, subtotal: 0,
+    quantidade: 1, valorProvisionado, subtotal: valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
@@ -1989,7 +1997,7 @@ function ligarEventos() {
     aplicarTema(escuro);
   };
 
-  ["#mc-valor", "#fin-valor-total", "#ld-valor"].forEach(ligarMascaraMoeda);
+  ["#mc-valor", "#fin-valor-total"].forEach(ligarMascaraMoeda);
   ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
 
   $("#btn-onboarding-proximo").onclick = () => {
