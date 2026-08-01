@@ -1,0 +1,24 @@
+#!/bin/sh
+# Incrementa automaticamente a versão exibida no app (public/mobile/index.html)
+# a cada commit. Pula se o commit já mexeu manualmente na linha de versão,
+# pra não incrementar duas vezes.
+FILE="public/mobile/index.html"
+
+[ -f "$FILE" ] || exit 0
+git diff --cached -- "$FILE" | grep -q 'id="app-versao"' && exit 0
+
+atual=$(grep -o 'id="app-versao">[0-9]\{1,\}\.[0-9]\{1,\}' "$FILE" | grep -o '[0-9]\{1,\}\.[0-9]\{1,\}')
+[ -z "$atual" ] && exit 0
+
+major=$(echo "$atual" | cut -d. -f1)
+minor=$(echo "$atual" | cut -d. -f2)
+minor=$((10#$minor + 1))
+if [ "$minor" -gt 99 ]; then
+  minor=0
+  major=$((10#$major + 1))
+fi
+nova=$(printf "%02d.%02d" "$major" "$minor")
+
+sed -i "s/id=\"app-versao\">$atual</id=\"app-versao\">$nova</" "$FILE"
+git add "$FILE"
+echo "Versão do app incrementada: $atual -> $nova"
