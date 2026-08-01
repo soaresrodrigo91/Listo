@@ -28,6 +28,14 @@ function formatarDataBR(dataISO) {
   const [ano, mes, dia] = dataISO.split("-");
   return `${dia}/${mes}/${ano}`;
 }
+// finalizadaEm é gravado com serverTimestamp() — vem como Firestore Timestamp, não string ISO.
+function formatarDataHoraBR(timestamp) {
+  if (!timestamp?.toDate) return "";
+  const d = timestamp.toDate();
+  const data = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  const hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${data} às ${hora}`;
+}
 function formatarMoeda(valor) {
   return (valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -68,13 +76,14 @@ function bloquearCaracteresInvalidosNumero(seletor) {
 const $ = (s) => document.querySelector(s);
 
 /* ---------- seeds do espaço novo ---------- */
-const GRUPOS_PADRAO = ["Higiene Pessoal", "Limpeza", "Verduras e Frutas", "Carnes", "Padaria", "Bebidas", "Laticínios", "Congelados", "Utilidades Domésticas"]
+const GRUPOS_PADRAO = ["Higiene Pessoal", "Limpeza", "Verduras e Frutas", "Carnes", "Padaria", "Bebidas", "Laticínios", "Congelados", "Utilidades Domésticas", "Temperos"]
   .map((nome) => ({ nome, descricao: null }));
-const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center Pão", "Super Kilo"]
+const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center Pão"]
   .map((nome) => ({ nome, endereco: null, cidade: null }));
 const FORMAS_PADRAO = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Flash"]
   .map((nome) => ({ nome }));
-const UNIDADES = ["Unidade", "Kg", "g", "Litro", "ml", "Caixa", "Pacote", "Garrafa", "Fardo"];
+const UNIDADES_PADRAO = ["Bandeja", "Caixa", "Dúzia", "Fardo", "Frasco", "Garrafa", "Gramas", "Kg", "Lata", "ml", "Rolo", "Saco", "Unidade"]
+  .map((nome) => ({ nome }));
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
 
@@ -88,7 +97,7 @@ let espacoIdAtual = null;
 let dadosCadastroPendente = null;
 let perfilAtual = { nome: "", sobrenome: "", telefone: "", fotoUrl: null, email: "" };
 let espacoAtual = { membros: [], membrosInfo: {} };
-let gruposAtuais = [], locaisAtuais = [], formasAtuais = [], itensAtuais = [], listasAtuais = [];
+let gruposAtuais = [], locaisAtuais = [], formasAtuais = [], unidadesAtuais = [], itensAtuais = [], listasAtuais = [];
 let itensListaAtuais = [];
 let historicoAtual = [];
 let convitesAtuais = [];
@@ -100,7 +109,7 @@ let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroLocalLista = null, filtroGrupoItens = null;
 
 let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais = null,
-  unsubFormas = null, unsubItens = null, unsubListas = null, unsubItensLista = null, unsubConvites = null,
+  unsubFormas = null, unsubUnidades = null, unsubItens = null, unsubListas = null, unsubItensLista = null, unsubConvites = null,
   unsubNotificacoes = null;
 
 /* ---------- inicialização ---------- */
@@ -137,7 +146,7 @@ window.addEventListener("DOMContentLoaded", () => {
     } else {
       usuario = null;
       espacoIdAtual = null;
-      [unsubUsuario, unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubItens, unsubListas, unsubItensLista, unsubConvites, unsubNotificacoes]
+      [unsubUsuario, unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubUnidades, unsubItens, unsubListas, unsubItensLista, unsubConvites, unsubNotificacoes]
         .forEach((u2) => u2 && u2());
       $("#carregando").classList.add("hidden");
       $("#app").classList.add("hidden");
@@ -277,6 +286,7 @@ async function garantirUsuarioEEspaco(user, nomeCadastro, sobrenomeCadastro, tel
       ...GRUPOS_PADRAO.map((g) => addDoc(collection(bd, "espacos", refEspaco.id, "grupos"), g)),
       ...LOCAIS_PADRAO.map((l) => addDoc(collection(bd, "espacos", refEspaco.id, "locais"), l)),
       ...FORMAS_PADRAO.map((f) => addDoc(collection(bd, "espacos", refEspaco.id, "formasPagamento"), f)),
+      ...UNIDADES_PADRAO.map((u) => addDoc(collection(bd, "espacos", refEspaco.id, "unidadesMedida"), u)),
     ]);
     espacoIdAtual = refEspaco.id;
   })();
@@ -291,23 +301,40 @@ async function garantirUsuarioEEspaco(user, nomeCadastro, sobrenomeCadastro, tel
 // grupos/locais/formas (ex.: falha de rede no meio do cadastro), semeia os padrões
 // assim que detectar as coleções vazias — garante que todo usuário que se cadastrar
 // sempre acabe com os cadastros padrão, mesmo que o seeding original tenha falhado.
+// Guard de single-flight por espaço: reconectarEspaco pode ser chamado de novo (ex.: o
+// próprio usuarios/{uid} mudando por outro motivo) antes da primeira checagem terminar —
+// sem isso, duas chamadas concorrentes podem ver a coleção vazia ao mesmo tempo e ambas
+// inserirem os padrões, duplicando tudo.
+const espacosSemeandoEmAndamento = new Set();
 async function garantirCatalogoSemeado(espacoId) {
+  if (espacosSemeandoEmAndamento.has(espacoId)) return;
+  espacosSemeandoEmAndamento.add(espacoId);
   try {
     const espacoSnap = await getDoc(doc(bd, "espacos", espacoId));
     if (!espacoSnap.exists() || espacoSnap.data().criadoPor !== usuario?.uid) return;
 
-    const [gruposSnap, locaisSnap, formasSnap] = await Promise.all([
-      getDocs(collection(bd, "espacos", espacoId, "grupos")),
-      getDocs(collection(bd, "espacos", espacoId, "locais")),
-      getDocs(collection(bd, "espacos", espacoId, "formasPagamento")),
-    ]);
-    await Promise.all([
-      gruposSnap.empty ? Promise.all(GRUPOS_PADRAO.map((g) => addDoc(collection(bd, "espacos", espacoId, "grupos"), g))) : null,
-      locaisSnap.empty ? Promise.all(LOCAIS_PADRAO.map((l) => addDoc(collection(bd, "espacos", espacoId, "locais"), l))) : null,
-      formasSnap.empty ? Promise.all(FORMAS_PADRAO.map((f) => addDoc(collection(bd, "espacos", espacoId, "formasPagamento"), f))) : null,
-    ]);
+    // allSettled (não all): se uma coleção falhar (ex.: regra nova ainda não publicada no
+    // Firebase Console), as outras ainda são checadas/semeadas normalmente — uma não trava as demais.
+    const colecoes = [
+      ["grupos", GRUPOS_PADRAO],
+      ["locais", LOCAIS_PADRAO],
+      ["formasPagamento", FORMAS_PADRAO],
+      ["unidadesMedida", UNIDADES_PADRAO],
+    ];
+    const resultados = await Promise.allSettled(
+      colecoes.map(([nome]) => getDocs(collection(bd, "espacos", espacoId, nome)))
+    );
+    await Promise.allSettled(
+      resultados.map((r, i) => {
+        if (r.status !== "fulfilled" || !r.value.empty) return null;
+        const [nome, padrao] = colecoes[i];
+        return Promise.all(padrao.map((doc_) => addDoc(collection(bd, "espacos", espacoId, nome), doc_)));
+      })
+    );
   } catch (e) {
     console.error("garantirCatalogoSemeado falhou:", e);
+  } finally {
+    espacosSemeandoEmAndamento.delete(espacoId);
   }
 }
 
@@ -330,7 +357,7 @@ function assinarUsuarioEEspaco(uid) {
 }
 
 function reconectarEspaco(espacoId) {
-  [unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubItens, unsubListas].forEach((u) => u && u());
+  [unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubUnidades, unsubItens, unsubListas].forEach((u) => u && u());
   garantirCatalogoSemeado(espacoId);
 
   unsubEspacoDoc = onSnapshot(doc(bd, "espacos", espacoId), (snap) => {
@@ -355,6 +382,10 @@ function reconectarEspaco(espacoId) {
     formasAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     preencherSelectFormaPagamento();
     renderCadastroFormas();
+  });
+  unsubUnidades = onSnapshot(collection(bd, "espacos", espacoId, "unidadesMedida"), (snap) => {
+    unidadesAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    renderCadastroUnidades();
   });
   unsubItens = onSnapshot(collection(bd, "espacos", espacoId, "itens"), (snap) => {
     itensAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -523,7 +554,7 @@ function renderDashboard() {
 // card "Itens pendentes" acompanha qual delas está visível no momento. Uma lista some do
 // carrossel assim que vira "comprada" (deixa de fazer parte de `pendentes`, vindo de fora).
 function renderCarrosselProximaCompra(pendentes) {
-  const ordenadas = [...pendentes].sort((a, b) => (a.dataPrevista || "9999").localeCompare(b.dataPrevista || "9999"));
+  const ordenadas = [...pendentes].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   const carrossel = $("#mini-carrossel-proxima");
   const pontos = $("#mini-carrossel-pontos");
 
@@ -536,7 +567,7 @@ function renderCarrosselProximaCompra(pendentes) {
   }
 
   carrossel.innerHTML = ordenadas
-    .map((l) => `<div class="mini-carrossel-slide" data-id="${l.id}">${esc(l.nome)}${l.dataPrevista ? ` · ${formatarDataBR(l.dataPrevista)}` : ""}</div>`)
+    .map((l) => `<div class="mini-carrossel-slide" data-id="${l.id}">${esc(l.nome)}</div>`)
     .join("");
   pontos.innerHTML = ordenadas.length > 1 ? ordenadas.map((_, i) => `<span class="${i === 0 ? "ativo" : ""}"></span>`).join("") : "";
 
@@ -591,7 +622,7 @@ function renderCarrosselListas() {
     container.innerHTML = `<div class="vazio">Nenhuma lista ainda. Toque em “+” para criar a primeira.</div>`;
     return;
   }
-  const ordenadas = [...listasAtuais].sort((a, b) => (a.dataPrevista || "9999").localeCompare(b.dataPrevista || "9999"));
+  const ordenadas = [...listasAtuais].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   container.innerHTML = ordenadas
     .map((l) => {
       const status = l.status || "pendente";
@@ -600,7 +631,7 @@ function renderCarrosselListas() {
         <div class="card-lista-topo">
           <div>
             <div class="card-lista-titulo">${esc(l.nome)}</div>
-            ${l.dataPrevista ? `<div class="card-lista-obs">${ICONE_CALENDARIO}${formatarDataBR(l.dataPrevista)}</div>` : ""}
+            ${l.finalizadaEm ? `<div class="card-lista-obs">${ICONE_CALENDARIO}Concluída em ${formatarDataHoraBR(l.finalizadaEm)}</div>` : ""}
             ${l.observacoes ? `<div class="card-lista-obs">${esc(l.observacoes)}</div>` : ""}
           </div>
           <span class="badge-status ${status}">${l.permanente ? "Permanente" : rotuloStatus}</span>
@@ -622,8 +653,6 @@ function abrirFormNovaLista() {
   telaAnterior = "listas";
   $("#fn-id").value = "";
   $("#fn-nome").value = "";
-  $("#fn-data").value = "";
-  $("#fn-data-wrap").classList.remove("hidden");
   $("#fn-observacoes").value = "";
   $("#btn-excluir-lista").classList.add("hidden");
   mostrarMsg("#msg-form-lista", "", "");
@@ -633,10 +662,6 @@ function abrirFormEditarLista(lista) {
   telaAnterior = "listas";
   $("#fn-id").value = lista.id;
   $("#fn-nome").value = lista.nome;
-  $("#fn-data").value = lista.dataPrevista || "";
-  // Lista permanente é um modelo legado (opção removida do formulário) — se a lista editada
-  // já for permanente, mantém o campo de data oculto e preserva a flag ao salvar.
-  $("#fn-data-wrap").classList.toggle("hidden", !!lista.permanente);
   $("#fn-observacoes").value = lista.observacoes || "";
   $("#btn-excluir-lista").classList.remove("hidden");
   mostrarMsg("#msg-form-lista", "", "");
@@ -646,19 +671,18 @@ async function salvarLista() {
   const id = $("#fn-id").value;
   const nome = $("#fn-nome").value.trim();
   const permanente = id ? !!listasAtuais.find((l) => l.id === id)?.permanente : false;
-  const dataPrevista = permanente ? null : $("#fn-data").value;
   const observacoes = $("#fn-observacoes").value.trim() || null;
-  if (!nome || (!permanente && !dataPrevista)) {
-    mostrarMsg("#msg-form-lista", "Preencha o nome e, se não for permanente, a data prevista.", "erro");
+  if (!nome) {
+    mostrarMsg("#msg-form-lista", "Preencha o nome da lista.", "erro");
     return;
   }
   $("#btn-salvar-lista").disabled = true;
   try {
     if (id) {
-      await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", id), { nome, dataPrevista, observacoes, permanente });
+      await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", id), { nome, observacoes, permanente });
     } else {
       await addDoc(collection(bd, "espacos", espacoIdAtual, "listas"), {
-        nome, dataPrevista, observacoes, permanente,
+        nome, observacoes, permanente,
         status: "pendente", qtdItens: 0, qtdComprados: 0, valorProvisionadoTotal: 0,
         criadoPor: usuario.uid, criadoEm: serverTimestamp(),
         finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
@@ -725,7 +749,7 @@ function compartilharListaWhatsApp() {
     .sort((a, b) => (a.grupoNome || "").localeCompare(b.grupoNome || "") || a.nome.localeCompare(b.nome, "pt-BR"))
     .map((i) => `${i.comprado ? "✅" : "🔲"} ${i.nome} - ${i.quantidade}${i.unidade ? ` ${i.unidade}` : ""}`)
     .join("\n");
-  const texto = `🛒 *${lista.nome}*${lista.dataPrevista ? ` (${formatarDataBR(lista.dataPrevista)})` : ""}\n\n${linhas || "Nenhum item ainda."}\n\nTotal previsto: ${formatarMoeda(lista.valorProvisionadoTotal || 0)}`;
+  const texto = `🛒 *${lista.nome}*\n\n${linhas || "Nenhum item ainda."}\n\nTotal previsto: ${formatarMoeda(lista.valorProvisionadoTotal || 0)}`;
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
 }
 
@@ -901,7 +925,7 @@ async function confirmarFinalizar() {
   const forma = formasAtuais.find((f) => f.id === formaId);
   const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
-    finalizadaEm: hojeISO(), formaPagamentoId: formaId, parcelas, valorTotalPago,
+    finalizadaEm: serverTimestamp(), formaPagamentoId: formaId, parcelas, valorTotalPago,
   });
   fecharModalFinalizar();
   exibirSucesso("Compra finalizada!");
@@ -953,7 +977,7 @@ function abrirPickerEnviarLista(item) {
     container.innerHTML = `<div class="vazio">Nenhuma lista pendente. Crie uma lista primeiro.</div>`;
   } else {
     container.innerHTML = pendentes
-      .map((l) => `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}${l.dataPrevista ? ` · ${formatarDataBR(l.dataPrevista)}` : ""}</button>`)
+      .map((l) => `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}</button>`)
       .join("");
     container.querySelectorAll(".opcao-lista-enviar").forEach((btn) => {
       btn.onclick = () => enviarItemParaLista(item, btn.dataset.listaId);
@@ -1069,12 +1093,13 @@ function abrirFormNovoItem() {
   mostrarTelaCheia("form-item", "Novo item");
 }
 
-// Mesmo princípio do autocomplete de item: nada vem sugerido/pré-selecionado por padrão — só
-// aparece opção conforme o usuário digita, e só conta como escolhido ao clicar numa sugestão.
+// Grupo e Unidade são listas pequenas e fechadas — ao focar o campo vazio, mostra todas as
+// opções cadastradas (não precisa digitar nada pra escolher); nunca vem pré-selecionado, só
+// conta como escolhido ao clicar numa sugestão.
 function renderSugestoesGrupo(query) {
   const container = $("#fi-grupo-sugestoes");
   const termo = query.trim().toLowerCase();
-  const encontrados = termo.length < 1 ? [] : gruposAtuais.filter((g) => g.nome.toLowerCase().includes(termo)).slice(0, 6);
+  const encontrados = termo.length < 1 ? gruposAtuais : gruposAtuais.filter((g) => g.nome.toLowerCase().includes(termo));
   if (encontrados.length === 0) {
     container.classList.add("hidden");
     container.innerHTML = "";
@@ -1096,13 +1121,13 @@ function renderSugestoesGrupo(query) {
 function renderSugestoesUnidade(query) {
   const container = $("#fi-unidade-sugestoes");
   const termo = query.trim().toLowerCase();
-  const encontradas = termo.length < 1 ? [] : UNIDADES.filter((u) => u.toLowerCase().includes(termo));
+  const encontradas = termo.length < 1 ? unidadesAtuais : unidadesAtuais.filter((u) => u.nome.toLowerCase().includes(termo));
   if (encontradas.length === 0) {
     container.classList.add("hidden");
     container.innerHTML = "";
     return;
   }
-  container.innerHTML = encontradas.map((u) => `<div class="autocomplete-item" data-unidade="${esc(u)}"><span>${esc(u)}</span></div>`).join("");
+  container.innerHTML = encontradas.map((u) => `<div class="autocomplete-item" data-unidade="${esc(u.nome)}"><span>${esc(u.nome)}</span></div>`).join("");
   container.classList.remove("hidden");
   container.querySelectorAll(".autocomplete-item").forEach((el) => {
     el.onclick = () => {
@@ -1161,7 +1186,7 @@ async function salvarItem() {
   const nome = $("#fi-nome").value.trim();
   const grupoId = $("#fi-grupo-id").value;
   const grupoNome = gruposAtuais.find((g) => g.id === grupoId)?.nome || null;
-  const unidade = UNIDADES.find((u) => u.toLowerCase() === $("#fi-unidade").value.trim().toLowerCase());
+  const unidade = unidadesAtuais.find((u) => u.nome.toLowerCase() === $("#fi-unidade").value.trim().toLowerCase())?.nome;
   if (!nome || !grupoId || !grupoNome) {
     mostrarMsg("#msg-form-item", "Digite o nome do grupo e selecione uma das sugestões.", "erro");
     return;
@@ -1470,6 +1495,59 @@ async function excluirFormaAtual() {
   irParaTela("cadastro-formas");
 }
 
+/* ---------- cadastro: unidades de medida ---------- */
+function renderCadastroUnidades() {
+  const container = $("#lista-cadastro-unidades");
+  if (unidadesAtuais.length === 0) {
+    container.innerHTML = `<div class="vazio">Nenhuma unidade de medida cadastrada.</div>`;
+    return;
+  }
+  container.innerHTML = unidadesAtuais.map((u) => `<div class="item" data-id="${u.id}"><div class="info"><div class="nome">${esc(u.nome)}</div></div></div>`).join("");
+  container.querySelectorAll(".item").forEach((el) => {
+    el.onclick = () => abrirFormEditarUnidade(unidadesAtuais.find((u) => u.id === el.dataset.id));
+  });
+}
+function abrirFormNovaUnidade() {
+  telaAnterior = "cadastro-unidades";
+  $("#fu-id").value = "";
+  $("#fu-nome").value = "";
+  $("#btn-excluir-unidade").classList.add("hidden");
+  mostrarMsg("#msg-form-unidade", "", "");
+  mostrarTelaCheia("form-unidade", "Nova unidade de medida");
+}
+function abrirFormEditarUnidade(unidade) {
+  telaAnterior = "cadastro-unidades";
+  $("#fu-id").value = unidade.id;
+  $("#fu-nome").value = unidade.nome;
+  $("#btn-excluir-unidade").classList.remove("hidden");
+  mostrarMsg("#msg-form-unidade", "", "");
+  mostrarTelaCheia("form-unidade", "Editar unidade de medida");
+}
+async function salvarUnidade() {
+  const id = $("#fu-id").value;
+  const nome = $("#fu-nome").value.trim();
+  if (!nome) {
+    mostrarMsg("#msg-form-unidade", "Informe o nome da unidade de medida.", "erro");
+    return;
+  }
+  if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), { nome });
+  else await addDoc(collection(bd, "espacos", espacoIdAtual, "unidadesMedida"), { nome });
+  exibirSucesso("Unidade de medida salva!");
+  irParaTela("cadastro-unidades");
+}
+async function excluirUnidadeAtual() {
+  const id = $("#fu-id").value;
+  if (!id) return;
+  const unidade = unidadesAtuais.find((u) => u.id === id);
+  if (unidade && itensAtuais.some((i) => i.unidade === unidade.nome)) {
+    mostrarMsg("#msg-form-unidade", "Esta unidade está vinculada a um ou mais itens do catálogo — mude a unidade desses itens antes de excluir.", "erro");
+    return;
+  }
+  if (!confirm("Excluir esta unidade de medida?")) return;
+  await deleteDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id));
+  irParaTela("cadastro-unidades");
+}
+
 /* ---------- listas compartilhadas (convites por e-mail) ---------- */
 function renderMembros() {
   const membros = espacoAtual.membrosInfo || {};
@@ -1629,14 +1707,14 @@ async function recusarConvite(convite) {
 }
 
 /* ---------- navegação ---------- */
-const TELAS_PRINCIPAIS = ["inicio", "listas", "cadastro-itens", "cadastro-grupos", "cadastro-locais", "cadastro-formas", "compartilhadas", "configuracoes", "seguranca"];
-const TELAS_CHEIAS = ["lista-detalhe", "item-detalhe", "form-item", "form-grupo", "form-local", "form-forma", "form-lista", "perfil", "notificacoes"];
+const TELAS_PRINCIPAIS = ["inicio", "listas", "cadastro-itens", "cadastro-grupos", "cadastro-locais", "cadastro-formas", "cadastro-unidades", "compartilhadas", "configuracoes", "seguranca"];
+const TELAS_CHEIAS = ["lista-detalhe", "item-detalhe", "form-item", "form-grupo", "form-local", "form-forma", "form-unidade", "form-lista", "perfil", "notificacoes"];
 const TODAS_AS_TELAS = [...TELAS_PRINCIPAIS, ...TELAS_CHEIAS];
 
 const TITULOS_TELA_PRINCIPAL = {
   inicio: "Início", listas: "Listas de Compras", "cadastro-itens": "Itens", "cadastro-grupos": "Grupos",
-  "cadastro-locais": "Locais", "cadastro-formas": "Formas de Pagamento", compartilhadas: "Listas Compartilhadas",
-  configuracoes: "Configurações", seguranca: "Segurança",
+  "cadastro-locais": "Locais", "cadastro-formas": "Formas de Pagamento", "cadastro-unidades": "Unidades de Medida",
+  compartilhadas: "Listas Compartilhadas", configuracoes: "Configurações", seguranca: "Segurança",
 };
 
 function irParaTela(nome) {
@@ -1807,6 +1885,7 @@ function ligarEventos() {
   $("#fab-cadastro-grupos").onclick = abrirFormNovoGrupo;
   $("#fab-cadastro-locais").onclick = abrirFormNovoLocal;
   $("#fab-cadastro-formas").onclick = abrirFormNovaForma;
+  $("#fab-cadastro-unidades").onclick = abrirFormNovaUnidade;
 
   $("#card-lista-proxima").onclick = () => {
     const id = $("#mini-carrossel-proxima").dataset.idSelecionado;
@@ -1853,8 +1932,10 @@ function ligarEventos() {
   $("#fi-nome").addEventListener("input", (e) => renderSugestoesItem(e.target.value));
   $("#fi-nome").addEventListener("blur", () => setTimeout(() => $("#fi-nome-sugestoes").classList.add("hidden"), 150));
   $("#fi-grupo-nome").addEventListener("input", (e) => { $("#fi-grupo-id").value = ""; renderSugestoesGrupo(e.target.value); });
+  $("#fi-grupo-nome").addEventListener("focus", (e) => renderSugestoesGrupo(e.target.value));
   $("#fi-grupo-nome").addEventListener("blur", () => setTimeout(() => $("#fi-grupo-sugestoes").classList.add("hidden"), 150));
   $("#fi-unidade").addEventListener("input", (e) => renderSugestoesUnidade(e.target.value));
+  $("#fi-unidade").addEventListener("focus", (e) => renderSugestoesUnidade(e.target.value));
   $("#fi-unidade").addEventListener("blur", () => setTimeout(() => $("#fi-unidade-sugestoes").classList.add("hidden"), 150));
   $("#btn-excluir-item").onclick = excluirItemAtual;
   $("#btn-cancelar-item").onclick = () => irParaTela(telaAnterior);
@@ -1874,6 +1955,10 @@ function ligarEventos() {
   $("#btn-salvar-forma").onclick = salvarForma;
   $("#btn-excluir-forma").onclick = excluirFormaAtual;
   $("#btn-cancelar-forma").onclick = () => irParaTela(telaAnterior);
+
+  $("#btn-salvar-unidade").onclick = salvarUnidade;
+  $("#btn-excluir-unidade").onclick = excluirUnidadeAtual;
+  $("#btn-cancelar-unidade").onclick = () => irParaTela(telaAnterior);
 
   $("#btn-convidar").onclick = convidarParaEspaco;
 

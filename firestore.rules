@@ -102,6 +102,10 @@ service cloud.firestore {
         allow read, write: if ehMembro();
       }
 
+      match /unidadesMedida/{unidadeId} {
+        allow read, write: if ehMembro();
+      }
+
       match /estatisticas/{docId} {
         allow read, write: if ehMembro();
       }

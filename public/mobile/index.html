@@ -89,6 +89,7 @@
         <button class="menu-item menu-sub" data-tela="cadastro-grupos"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M20.4 13.4 13.4 20.4a1.5 1.5 0 0 1-2.1 0l-7.7-7.7a1.5 1.5 0 0 1-.4-1V4.5A1.5 1.5 0 0 1 4.7 3h7.2c.4 0 .8.2 1 .4l7.7 7.7a1.5 1.5 0 0 1-.2 2.3Z"/><circle cx="8" cy="8" r="1.4"/></svg></span>Grupos</button>
         <button class="menu-item menu-sub" data-tela="cadastro-locais"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 21s7-6.7 7-12a7 7 0 0 0-14 0c0 5.3 7 12 7 12Z"/><circle cx="12" cy="9" r="2.3"/></svg></span>Locais</button>
         <button class="menu-item menu-sub" data-tela="cadastro-formas"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><rect x="2.5" y="5.5" width="19" height="13" rx="2.2"/><path d="M2.5 10h19"/></svg></span>Formas de Pagamento</button>
+        <button class="menu-item menu-sub" data-tela="cadastro-unidades"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M4 7h16M4 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Unidades de Medida</button>
       </div>
       <button class="menu-item" data-tela="compartilhadas"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="8.5" cy="8" r="3"/><path d="M2.5 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.3 14.1c2.5.5 4.2 2.4 4.2 5.4"/></svg></span>Listas Compartilhadas</button>
       <button class="menu-item" data-tela="configuracoes"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.04H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.04 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10.5a1.7 1.7 0 0 0 1.04-1.56V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10.5a1.7 1.7 0 0 0 1.56 1.04H19.5a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04Z"/></svg></span>Configurações</button>
@@ -96,7 +97,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.17</div>
+      <div class="menu-versao" id="app-versao">01.20</div>
     </div>
   </aside>
 
@@ -270,11 +271,11 @@
       <input type="hidden" id="fi-id">
       <div class="field" style="position:relative">
         <label>Nome *</label>
-        <input id="fi-nome" type="text" autocomplete="off">
+        <input id="fi-nome" type="text" autocomplete="off" placeholder="Digite nome do item...">
         <div class="autocomplete-lista hidden" id="fi-nome-sugestoes"></div>
       </div>
-      <div class="field"><label>Descrição</label><input id="fi-descricao" type="text"></div>
-      <div class="field"><label>Marca</label><input id="fi-marca" type="text"></div>
+      <div class="field"><label>Descrição</label><input id="fi-descricao" type="text" placeholder="Digite descrição: Integral, Sem glúten..."></div>
+      <div class="field"><label>Marca</label><input id="fi-marca" type="text" placeholder="Digite a marca..."></div>
       <div class="linha-dupla">
         <div class="field" style="position:relative">
           <label>Grupo *</label>
@@ -369,12 +370,30 @@
     </main>
   </div>
 
+  <!-- ---------- Cadastro: Unidades de Medida ---------- -->
+  <div id="tela-cadastro-unidades" class="screen hidden">
+    <main>
+      <div class="lista" id="lista-cadastro-unidades"></div>
+    </main>
+    <button class="fab" id="fab-cadastro-unidades">+</button>
+  </div>
+
+  <div id="tela-form-unidade" class="screen hidden">
+    <main>
+      <input type="hidden" id="fu-id">
+      <div class="field"><label>Nome *</label><input id="fu-nome" type="text"></div>
+      <div id="msg-form-unidade"></div>
+      <button class="btn" id="btn-salvar-unidade">Salvar</button>
+      <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-unidade">Excluir unidade de medida</button>
+      <button class="btn-secundario btn-cancelar" id="btn-cancelar-unidade">Cancelar</button>
+    </main>
+  </div>
+
   <!-- ---------- Nova/editar Lista ---------- -->
   <div id="tela-form-lista" class="screen hidden">
     <main>
       <input type="hidden" id="fn-id">
       <div class="field"><label>Nome da lista *</label><input id="fn-nome" type="text" placeholder="Ex.: Compras do mês"></div>
-      <div class="field" id="fn-data-wrap"><label>Data prevista da compra *</label><input id="fn-data" type="date"></div>
       <div class="field"><label>Observações</label><input id="fn-observacoes" type="text" placeholder="Opcional"></div>
       <div id="msg-form-lista"></div>
       <button class="btn" id="btn-salvar-lista">Salvar</button>

@@ -45,6 +45,9 @@ espacos/{espacoId}
   formasPagamento/{formaId}
     nome
 
+  unidadesMedida/{unidadeId}
+    nome
+
   estatisticas/geral                   // contadores incrementados a cada item marcado como comprado
     itens: { [itemId]: contagem }
     grupos: { [grupoNome]: contagem }
@@ -59,13 +62,15 @@ espacos/{espacoId}
       localId, valor, data, listaId
 
   listas/{listaId}
-    nome, dataPrevista, observacoes
+    nome, observacoes                    // sem data prevista — a lista não tem data de criação/compra
+                                        // planejada, só a data/hora real em que foi concluída (finalizadaEm)
     permanente: boolean                // lista contínua, sem data de finalização fixa — modelo legado,
                                         // não há mais opção no formulário para criar uma nova assim
     status: "pendente" | "parcial" | "comprada"
     qtdItens, qtdComprados, valorProvisionadoTotal   // agregados, recalculados a cada alteração de item
     criadoPor, criadoEm
     finalizadaEm, formaPagamentoId, parcelas, valorTotalPago   // preenchidos ao finalizar
+                                                                // finalizadaEm = serverTimestamp() (data e hora reais da conclusão)
 
     itensLista/{itemListaId}
       itemId, nome, unidade, grupoNome         // denormalizado do catálogo no momento da inserção
@@ -85,26 +90,26 @@ notificacoes/{id}                              // aparecem no sino do topbar
 
 ### Seeds do espaço novo (criados no cadastro)
 
-**Grupos:** Higiene Pessoal, Limpeza, Verduras e Frutas, Carnes, Padaria, Bebidas, Laticínios, Congelados, Utilidades Domésticas.
+**Grupos:** Higiene Pessoal, Limpeza, Verduras e Frutas, Carnes, Padaria, Bebidas, Laticínios, Congelados, Utilidades Domésticas, Temperos.
 
-**Locais:** Supermercados BH, Villefort, Mart Minas, Center Pão, Super Kilo.
+**Locais:** Supermercados BH, Villefort, Mart Minas, Center Pão.
 
 **Formas de pagamento:** PIX, Dinheiro, Cartão de Débito, Cartão de Crédito, Flash.
 
-**Unidades de medida** (não é coleção, é lista fixa usada nos formulários): Unidade, Kg, g, Litro, ml, Caixa, Pacote, Garrafa, Fardo.
+**Unidades de medida:** Bandeja, Caixa, Dúzia, Fardo, Frasco, Garrafa, Gramas, Kg, Lata, ml, Rolo, Saco, Unidade.
 
 ## 4. Regras de negócio
 
 1. **Item do catálogo é único** (`espacos/{id}/itens`): campos obrigatórios nome, grupo, unidade. Não tem valor de referência — o preço só passa a existir depois da primeira compra registrada (ver histórico de preços por local).
 2. **Ao adicionar um item a uma lista**, o app copia nome/unidade/grupo do catálogo para `itensLista` (denormalizado); o valor provisionado começa em branco e é digitado pelo usuário.
-3. **Nome, Grupo e Unidade sempre em campo de texto com sugestão** (nunca `<select>` pré-selecionado): grupo e unidade sugerem conforme o usuário digita, a partir dos já cadastrados (grupo) ou da lista fixa de unidades; só valem quando uma sugestão é clicada. O campo "Item" ao adicionar numa lista funciona igual, filtrando o catálogo.
+3. **Nome, Grupo e Unidade sempre em campo de texto com sugestão** (nunca `<select>` pré-selecionado): nada vem pré-selecionado, só conta como escolhido quando uma sugestão é clicada. Grupo e Unidade são listas pequenas e fechadas — ao focar o campo (mesmo vazio), já mostram todas as opções cadastradas em `grupos`/`unidadesMedida`, filtrando conforme o usuário digita. O campo "Item" (catálogo e ao adicionar numa lista) só sugere a partir de 1-2 caracteres digitados, já que o catálogo pode crescer bastante.
 4. **Subtotal e totais em tempo real:** cada `itensLista` tem `subtotal = quantidade × valorProvisionado`; a lista mantém `qtdItens`, `qtdComprados` e `valorProvisionadoTotal` recalculados a cada escrita em `itensLista` (feito pelo cliente, não por Cloud Function).
 5. **Status da lista:** `pendente` (nenhum item comprado), `parcial` (0 < comprados < total), `comprada` (todos comprados e total > 0). Cor no carrossel: vermelho / amarelo / verde, respectivamente.
 6. **Marcar item como comprado exige, antes de permitir o check:** local de compra e valor pago. Ao confirmar, grava `comprado: true`, `localCompraId`, `valorPago`, `compradoPor`, `compradoEm` **e** cria um registro em `itens/{itemId}/historicoPrecos` (local, valor, data, listaId de origem) — é assim que o histórico de preços por estabelecimento é alimentado. Desmarcar limpa os campos de compra do item, mas não apaga o histórico já registrado.
 7. **Comparador de preços** (aba dentro do item do catálogo): lê `historicoPrecos` do item, mas primeiro reduz a **um registro por local** (o mais recente por data, quando o mesmo item foi comprado no mesmo local mais de uma vez com valores diferentes) — é sobre esse conjunto reduzido que calcula menor/maior/média e monta a tabela local × valor × data. O histórico bruto (todas as compras) continua gravado no Firestore, só não é somado/mostrado duplicado.
 8. Essa mesma regra de "só o valor mais recente por local" vale para os dashboards **Locais com preços mais baratos** e **Itens mais baratos aqui** (tela de Locais).
 8.1. O usuário pode excluir, a qualquer momento, o histórico de preços de um item num local específico (aba "Histórico de Preços" do item) — a exclusão remove todos os registros daquele item+local, não só o mais recente exibido.
-9. **Finalização da compra:** quando todos os itens de uma lista não-permanente são marcados, o app oferece finalizar — solicita forma de pagamento, parcelamento (se crédito) e valor total pago, grava em campos da lista e marca `status: "comprada"`.
+9. **Finalização da compra:** quando todos os itens de uma lista não-permanente são marcados, o app oferece finalizar — solicita forma de pagamento, parcelamento (se crédito) e valor total pago, grava em campos da lista, marca `status: "comprada"` e grava `finalizadaEm` com a data e hora reais da conclusão (a lista não tem data prevista antes disso).
 10. **Lista permanente:** uma lista com `permanente: true` nunca é "finalizada" automaticamente; o usuário vai adicionando itens ao longo do tempo e finaliza manualmente quando quiser (equivalente a uma lista contínua da semana).
 11. **Compartilhamento:** ver seção 2. Convite por e-mail com ID determinístico `convites/{espacoId}_{emailNormalizado}`, aceitar/recusar, mesmo padrão usado no financeiro (índice de e-mails + get() nas rules).
 
@@ -116,12 +121,12 @@ notificacoes/{id}                              // aparecem no sino do topbar
 4. **Lista (detalhe)** — formulário de itens (adicionar do catálogo, quantidade, valor provisionado, subtotal), checkbox por item (abre modal obrigatório de local + valor antes de marcar), totais em tempo real, botão finalizar quando aplicável.
 5. **Item do catálogo (detalhe)** — 3 abas: **Cadastro** (dados cadastrais), **Imagem** (foto do item — tirar/enviar/remover direto por aqui, sem precisar abrir "Editar item") e **Histórico** (tabela local/valor/data + menor/maior/média).
 5.1. **Enviar item para lista pendente** — na tela de Itens (Cadastros), cada item tem um atalho para enviar direto a uma lista pendente; se houver mais de uma pendente, o app sempre pergunta qual (nunca escolhe sozinho).
-6. **Cadastros** — Itens, Grupos, Locais, Formas de Pagamento (listas simples + formulário).
+6. **Cadastros** — Itens, Grupos, Locais, Formas de Pagamento, Unidades de Medida (listas simples + formulário).
 7. **Listas Compartilhadas** — convidar por e-mail, ver membros do espaço, aceitar/recusar convites recebidos.
 8. **Perfil** — foto, nome, sobrenome, telefone, e-mail.
 9. **Configurações** — tema escuro, sair.
 
-Menu lateral (drawer): Início, Dashboard, Listas de Compras, Cadastros (Itens, Grupos, Locais, Formas de Pagamento), Listas Compartilhadas, Perfil, Configurações, Sair.
+Menu lateral (drawer): Início, Dashboard, Listas de Compras, Cadastros (Itens, Grupos, Locais, Formas de Pagamento, Unidades de Medida), Listas Compartilhadas, Perfil, Configurações, Sair.
 
 ## 6. Fases
 
