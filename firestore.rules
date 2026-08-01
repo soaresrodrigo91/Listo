@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /usuarios/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /indiceEmails/{emailNormalizado} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == request.resource.data.uid
+        && emailNormalizado == request.auth.token.email.lower();
+    }
+
+    // ID do convite é sempre "{espacoId}_{paraEmail normalizado}" — permite que a regra de
+    // "aceitar convite" (abaixo, em espacos/{espacoId}) leia o convite certo com get(),
+    // sem precisar de uma query (rules não fazem where()).
+    match /convites/{conviteId} {
+      allow read: if request.auth != null && (
+        resource.data.deUid == request.auth.uid
+        || resource.data.paraUid == request.auth.uid
+        || resource.data.paraEmail == request.auth.token.email.lower()
+      );
+
+      allow create: if request.auth != null
+        && request.resource.data.deUid == request.auth.uid
+        && request.resource.data.deEmail == request.auth.token.email.lower()
+        && request.resource.data.status == "pendente"
+        && conviteId == request.resource.data.espacoId + "_" + request.resource.data.paraEmail
+        && request.auth.uid in get(/databases/$(database)/documents/espacos/$(request.resource.data.espacoId)).data.membros;
+
+      allow update: if request.auth != null
+        && resource.data.status == "pendente"
+        && (resource.data.paraUid == request.auth.uid || resource.data.paraEmail == request.auth.token.email.lower())
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "paraUid"])
+        && request.resource.data.status in ["aceito", "recusado"];
+
+      allow delete: if request.auth != null && resource.data.deUid == request.auth.uid;
+    }
+
+    // Notificações sempre são escritas por alguém diferente do destinatário (quem convida
+    // notifica o convidado; quem aceita notifica quem convidou) — por isso as duas regras de
+    // create validam contra o convite relacionado (get()) em vez de exigir autor == destinatário.
+    match /notificacoes/{notifId} {
+      allow read: if request.auth != null && resource.data.uidDestino == request.auth.uid;
+
+      allow create: if request.auth != null && (
+        // tipo "convite_recebido": o convidante notifica o convidado (paraUid do convite).
+        (request.resource.data.tipo == "convite_recebido"
+          && get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.resource.data.paraEmail)).data.deUid == request.auth.uid
+          && get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.resource.data.paraEmail)).data.paraUid == request.resource.data.uidDestino)
+        ||
+        // tipo "convite_aceito": quem aceita notifica quem convidou (deUid do convite).
+        (request.resource.data.tipo == "convite_aceito"
+          && get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.auth.token.email.lower())).data.status == "pendente"
+          && request.resource.data.uidDestino == get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.auth.token.email.lower())).data.deUid)
+      );
+
+      allow delete: if request.auth != null && resource.data.uidDestino == request.auth.uid;
+    }
+
+    match /espacos/{espacoId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.membros;
+
+      allow create: if request.auth != null
+        && request.resource.data.criadoPor == request.auth.uid
+        && request.resource.data.membros == [request.auth.uid];
+
+      allow update: if request.auth != null && (
+        // Membro existente edita nome/membrosInfo, sem mexer no array de membros.
+        (request.auth.uid in resource.data.membros
+          && request.resource.data.membros == resource.data.membros)
+        ||
+        // Aceitar convite: o próprio usuário se adiciona, só se houver convite pendente
+        // dele para este espaço.
+        (request.auth.uid in request.resource.data.membros
+          && !(request.auth.uid in resource.data.membros)
+          && request.resource.data.membros == resource.data.membros.concat([request.auth.uid])
+          && get(/databases/$(database)/documents/convites/$(espacoId + "_" + request.auth.token.email.lower())).data.status == "pendente")
+        ||
+        // Sair do espaço: o próprio usuário remove só a si mesmo do array.
+        (request.auth.uid in resource.data.membros
+          && !(request.auth.uid in request.resource.data.membros)
+          && request.resource.data.membros == resource.data.membros.removeAll([request.auth.uid]))
+      );
+
+      function ehMembro() {
+        return request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/espacos/$(espacoId)).data.membros;
+      }
+
+      match /grupos/{grupoId} {
+        allow read, write: if ehMembro();
+      }
+
+      match /locais/{localId} {
+        allow read, write: if ehMembro();
+      }
+
+      match /formasPagamento/{formaId} {
+        allow read, write: if ehMembro();
+      }
+
+      match /estatisticas/{docId} {
+        allow read, write: if ehMembro();
+      }
+
+      match /itens/{itemId} {
+        allow read, write: if ehMembro();
+
+        match /historicoPrecos/{registroId} {
+          allow read, write: if ehMembro();
+        }
+      }
+
+      match /listas/{listaId} {
+        allow read, write: if ehMembro();
+
+        match /itensLista/{itemListaId} {
+          allow read, write: if ehMembro();
+        }
+      }
+    }
+  }
+}

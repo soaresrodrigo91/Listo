@@ -1,0 +1,128 @@
+# Lista de Compras — Especificação do App
+
+App de listas de compras domésticas com **espaço compartilhado**: catálogo de produtos, grupos, locais de compra, formas de pagamento e listas de compras vivem dentro de um "espaço" que pode ter mais de um membro (ex.: casal). Convidar alguém por e-mail coloca a pessoa no mesmo espaço — a partir daí os dois veem exatamente as mesmas listas, os mesmos itens, os mesmos grupos e os mesmos locais, sincronizados em tempo real.
+
+Este documento substitui a v1 (modelo de "membros por lista"). Veja a nota no fim sobre o que ficou desatualizado.
+
+## 1. Produto e stack
+
+O produto principal é um **app mobile web (PWA)** em HTML/CSS/JS puro (sem framework, sem build step), no mesmo padrão do app mobile do Controle Financeiro (`ControleFinanceiro/public/mobile`): uma tela por `<div class="screen">`, navegação por troca de classe `hidden`, drawer lateral, FAB, Firebase via CDN (módulos ES).
+
+- **App mobile:** `public/mobile/index.html` + `style.css` + `app.js`, servido também pela mesma hospedagem do projeto Next.js (rewrite `/mobile` → `/mobile/index.html`).
+- **Autenticação:** Firebase Authentication (e-mail/senha).
+- **Banco:** Cloud Firestore, sincronização em tempo real via `onSnapshot`.
+- **As páginas Next.js criadas numa primeira versão** (`src/app/...`) usavam um modelo de dados mais simples (compartilhamento por lista individual) e **não foram atualizadas** para o modelo de espaço compartilhado abaixo — ficaram desatualizadas em relação a este documento. O app mobile é a referência atual.
+
+## 2. Espaço compartilhado
+
+- No cadastro, cada usuário ganha automaticamente um **espaço próprio** (`espacos/{espacoId}`), do qual é o único membro e criador.
+- O espaço já nasce com grupos, locais e formas de pagamento pré-cadastrados (ver seeds abaixo).
+- Convidar alguém por e-mail: se a pessoa aceitar, ela passa a ter aquele espaço como **espaço ativo** (`usuarios/{uid}.espacoId` é atualizado) e é adicionada a `espacos/{espacoId}.membros`. A partir daí enxerga o catálogo e as listas desse espaço, não mais o espaço que tinha antes (que continua existindo no banco, apenas fica sem uso).
+- Não há hierarquia entre membros de um espaço — qualquer membro cadastra itens, grupos, locais, cria/edita listas e marca compras.
+
+## 3. Modelo de dados (Firestore)
+
+```
+usuarios/{uid}
+  nome, sobrenome, telefone, fotoUrl, email
+  espacoId              // espaço ativo do usuário
+  criadoEm
+
+indiceEmails/{emailNormalizado}
+  uid                   // localizar uid pelo e-mail, para convidar
+
+espacos/{espacoId}
+  criadoPor, criadoEm
+  membros: string[]
+  membrosInfo: { [uid]: { nome, email } }
+
+  grupos/{grupoId}
+    nome, descricao
+
+  locais/{localId}
+    nome, endereco, cidade, site      // link do supermercado, com botão "Abrir site" no cadastro
+
+  formasPagamento/{formaId}
+    nome
+
+  estatisticas/geral                   // contadores incrementados a cada item marcado como comprado
+    itens: { [itemId]: contagem }
+    grupos: { [grupoNome]: contagem }
+    locais: { [localId]: contagem }
+
+  itens/{itemId}                       // catálogo único de produtos
+    nome, descricao, marca, grupoId, unidade
+    // Sem valor de referência no cadastro — o preço só existe depois de uma compra real
+    // registrada numa lista (ver historicoPrecos abaixo); "quanto custa" é sempre por local.
+    historicoPrecos/{registroId}       // 1 registro por compra confirmada
+      localId, valor, data, listaId
+
+  listas/{listaId}
+    nome, dataPrevista, observacoes
+    permanente: boolean                // lista contínua, sem data de finalização fixa
+    status: "pendente" | "parcial" | "comprada"
+    qtdItens, qtdComprados, valorProvisionadoTotal   // agregados, recalculados a cada alteração de item
+    criadoPor, criadoEm
+    finalizadaEm, formaPagamentoId, parcelas, valorTotalPago   // preenchidos ao finalizar
+
+    itensLista/{itemListaId}
+      itemId, nome, unidade, grupoNome         // denormalizado do catálogo no momento da inserção
+      quantidade, valorProvisionado, subtotal  // subtotal = quantidade * valorProvisionado
+      adicionadoPor, adicionadoPorNome         // quem inseriu o item (exibido quando o espaço tem 2+ membros)
+      comprado: boolean
+      localCompraId, valorPago, compradoPor, compradoEm
+
+convites/{espacoId}_{emailNormalizado}         // ID determinístico (mesmo motivo da v1: rules com get())
+  espacoId, deUid, deEmail, paraEmail, paraUid, status, criadoEm
+
+notificacoes/{id}                              // aparecem no sino do topbar
+  tipo: "convite_recebido" | "convite_aceito"
+  uidDestino, espacoId, mensagem, criadoEm, lida
+  paraEmail                                    // só em "convite_recebido" (usado pela rule)
+```
+
+### Seeds do espaço novo (criados no cadastro)
+
+**Grupos:** Higiene Pessoal, Limpeza, Verduras e Frutas, Carnes, Padaria, Bebidas, Laticínios, Congelados, Utilidades Domésticas.
+
+**Locais:** Supermercados BH, Villefort, Mart Minas, Center Pão, Super Kilo.
+
+**Formas de pagamento:** PIX, Dinheiro, Cartão de Débito, Cartão de Crédito, Flash.
+
+**Unidades de medida** (não é coleção, é lista fixa usada nos formulários): Unidade, Kg, g, Litro, ml, Caixa, Pacote, Garrafa, Fardo.
+
+## 4. Regras de negócio
+
+1. **Item do catálogo é único** (`espacos/{id}/itens`): campos obrigatórios nome, grupo, unidade. Não tem valor de referência — o preço só passa a existir depois da primeira compra registrada (ver histórico de preços por local).
+2. **Ao adicionar um item a uma lista**, o app copia nome/unidade/grupo do catálogo para `itensLista` (denormalizado); o valor provisionado começa em branco e é digitado pelo usuário.
+3. **Nome, Grupo e Unidade sempre em campo de texto com sugestão** (nunca `<select>` pré-selecionado): grupo e unidade sugerem conforme o usuário digita, a partir dos já cadastrados (grupo) ou da lista fixa de unidades; só valem quando uma sugestão é clicada. O campo "Item" ao adicionar numa lista funciona igual, filtrando o catálogo.
+4. **Subtotal e totais em tempo real:** cada `itensLista` tem `subtotal = quantidade × valorProvisionado`; a lista mantém `qtdItens`, `qtdComprados` e `valorProvisionadoTotal` recalculados a cada escrita em `itensLista` (feito pelo cliente, não por Cloud Function).
+5. **Status da lista:** `pendente` (nenhum item comprado), `parcial` (0 < comprados < total), `comprada` (todos comprados e total > 0). Cor no carrossel: vermelho / amarelo / verde, respectivamente.
+6. **Marcar item como comprado exige, antes de permitir o check:** local de compra e valor pago. Ao confirmar, grava `comprado: true`, `localCompraId`, `valorPago`, `compradoPor`, `compradoEm` **e** cria um registro em `itens/{itemId}/historicoPrecos` (local, valor, data, listaId de origem) — é assim que o histórico de preços por estabelecimento é alimentado. Desmarcar limpa os campos de compra do item, mas não apaga o histórico já registrado.
+7. **Comparador de preços** (aba dentro do item do catálogo): lê `historicoPrecos` do item, mas primeiro reduz a **um registro por local** (o mais recente por data, quando o mesmo item foi comprado no mesmo local mais de uma vez com valores diferentes) — é sobre esse conjunto reduzido que calcula menor/maior/média e monta a tabela local × valor × data. O histórico bruto (todas as compras) continua gravado no Firestore, só não é somado/mostrado duplicado.
+8. Essa mesma regra de "só o valor mais recente por local" vale para os dashboards **Locais com preços mais baratos** e **Itens mais baratos aqui** (tela de Locais).
+9. **Finalização da compra:** quando todos os itens de uma lista não-permanente são marcados, o app oferece finalizar — solicita forma de pagamento, parcelamento (se crédito) e valor total pago, grava em campos da lista e marca `status: "comprada"`.
+10. **Lista permanente:** uma lista com `permanente: true` nunca é "finalizada" automaticamente; o usuário vai adicionando itens ao longo do tempo e finaliza manualmente quando quiser (equivalente a uma lista contínua da semana).
+11. **Compartilhamento:** ver seção 2. Convite por e-mail com ID determinístico `convites/{espacoId}_{emailNormalizado}`, aceitar/recusar, mesmo padrão usado no financeiro (índice de e-mails + get() nas rules).
+
+## 5. Telas do app mobile
+
+1. **Login** — e-mail/senha (mesma conta usada em qualquer outro app do usuário), esqueci minha senha.
+2. **Início** — saudação ("Olá, {nome}! Vamos organizar sua próxima compra?"), dashboard (cards: valor provisionado das listas pendentes, quantidade de itens pendentes, lista mais próxima da data de compra) e gráficos (itens mais comprados, grupos mais utilizados, locais mais utilizados). FAB com speed-dial: Novo Item / Nova Lista.
+3. **Listas** — carrossel de cards (título, data prevista, observação, valor provisionado, quantidade de itens, status colorido).
+4. **Lista (detalhe)** — formulário de itens (adicionar do catálogo, quantidade, valor provisionado, subtotal), checkbox por item (abre modal obrigatório de local + valor antes de marcar), totais em tempo real, botão finalizar quando aplicável.
+5. **Item do catálogo (detalhe)** — dados cadastrais + aba "Histórico de Preços" (tabela local/valor/data + menor/maior/média).
+6. **Cadastros** — Itens, Grupos, Locais, Formas de Pagamento (listas simples + formulário).
+7. **Listas Compartilhadas** — convidar por e-mail, ver membros do espaço, aceitar/recusar convites recebidos.
+8. **Perfil** — foto, nome, sobrenome, telefone, e-mail.
+9. **Configurações** — tema escuro, sair.
+
+Menu lateral (drawer): Início, Dashboard, Listas de Compras, Cadastros (Itens, Grupos, Locais, Formas de Pagamento), Listas Compartilhadas, Perfil, Configurações, Sair.
+
+## 6. Fases
+
+1. **MVP (este documento):** tudo das seções 2–5 acima.
+2. **Diferenciais inteligentes:** sugestão automática de compra recorrente, alerta de aumento de preço, "melhor supermercado" para a lista atual, economia obtida vs. preço médio/mais caro, filtros inteligentes, busca rápida, duplicar lista, estatísticas mensais (gasto por grupo/supermercado, evolução do orçamento).
+3. **Funcionalidades futuras:** leitura de código de barras, importação de NFC-e, lista por voz, sugestão de itens recorrentes, comparativo de preços por período, notificações de dia de compra, modo offline, busca inteligente, favoritos, categorias personalizadas.
+
+Fases 2 e 3 ficam de fora do MVP — dependem de mais dados históricos acumulados e/ou de infraestrutura adicional (notificações push, reconhecimento de imagem/voz) fora do escopo de um app cliente-only sobre Firestore.

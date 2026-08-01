@@ -1,0 +1,10 @@
+{
+  "name": "Lista de Compras",
+  "short_name": "Compras",
+  "description": "Listas de compras compartilhadas em tempo real",
+  "start_url": "/listas",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": []
+}
