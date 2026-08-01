@@ -1427,6 +1427,9 @@ main::-webkit-scrollbar {
   min-width: 0;
   width: 100%;
 }
+.linha-item-qtd {
+  grid-template-columns: 2.2fr 1fr;
+}
 
 .check-linha {
   display: flex;
