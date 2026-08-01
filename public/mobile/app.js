@@ -745,7 +745,7 @@ function listaAbertaAtual() {
 // pessoa escolher WhatsApp, SMS, e-mail etc.); em navegador sem suporte, cai pro link do WhatsApp.
 function convidarAmigo() {
   const link = `${window.location.origin}/mobile`;
-  const texto = `Estou usando o Listo pra organizar as compras de casa — cadastro de itens, comparação de preços por mercado e lista compartilhada em tempo real. Dá uma olhada: ${link}`;
+  const texto = `🛒 Estou usando este app de lista de compras compartilhada e achei muito prático! Com ele podemos criar listas em conjunto, acompanhar alterações em tempo real, comparar preços entre mercados e controlar o que já foi comprado ou ainda está pendente. Experimente! ${link}`;
   if (navigator.share) {
     navigator.share({ title: "Listo", text: texto, url: link }).catch(() => {});
   } else {
@@ -827,8 +827,7 @@ function renderListaDetalhe() {
     });
   }
 
-  const todosComprados = lista.qtdItens > 0 && lista.qtdComprados === lista.qtdItens;
-  $("#btn-finalizar-compra").classList.toggle("hidden", !(todosComprados && !lista.permanente && !lista.finalizadaEm));
+  $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
 }
 
 // Sem campo manual de valor provisionado: usa o preço mais recente já registrado pra esse
@@ -902,9 +901,8 @@ async function confirmarCompra() {
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     comprado: true, localCompraId: localId, valorPago, compradoPor: usuario.uid, compradoEm: hojeISO(),
   });
-  await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", item.itemId, "historicoPrecos"), {
-    localId, valor: valorPago, data: hojeISO(), listaId: listaAbertaId,
-  });
+  // Histórico de preços só é gravado na finalização da compra (confirmarFinalizar), não aqui:
+  // até lá o check é só o estado "peguei no carrinho", podendo ser desmarcado sem deixar rastro.
   await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
     itens: { [item.itemId]: increment(1) },
     grupos: { [item.grupoNome || "Outros"]: increment(1) },
@@ -929,6 +927,12 @@ function abrirModalFinalizar() {
   const lista = listaAbertaAtual();
   if (lista) $("#fin-valor-total").value = formatarMoeda(lista.valorProvisionadoTotal || 0);
   mostrarMsg("#msg-finalizar", "", "");
+  const pendentes = lista ? lista.qtdItens - lista.qtdComprados : 0;
+  mostrarMsg(
+    "#aviso-pendentes-finalizar",
+    pendentes > 0 ? `Ainda ${pendentes === 1 ? "falta 1 item" : `faltam ${pendentes} itens`} pegar nesta lista. Você pode finalizar mesmo assim — quem ficar pendente mantém o último histórico de preço registrado.` : "",
+    ""
+  );
   $("#overlay-finalizar").classList.remove("hidden");
 }
 function fecharModalFinalizar() {
@@ -943,6 +947,13 @@ async function confirmarFinalizar() {
   }
   const forma = formasAtuais.find((f) => f.id === formaId);
   const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
+  // Grava o histórico de preços agora (não no check individual): só os itens efetivamente
+  // marcados como comprados entram; os pendentes simplesmente mantêm o histórico anterior.
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"));
+  const comprados = snap.docs.map((d) => d.data()).filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
+  await Promise.all(comprados.map((i) => addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
+    localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
+  })));
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
     finalizadaEm: serverTimestamp(), formaPagamentoId: formaId, parcelas, valorTotalPago,
   });
@@ -959,6 +970,7 @@ function renderChipsFiltroGrupo() {
 function renderChipsFiltroLocal() { /* usado dentro de renderListaDetalhe */ }
 
 function renderCadastroItens() {
+  renderChipsFiltroGrupo();
   let lista = itensAtuais;
   if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
   const container = $("#lista-cadastro-itens");
@@ -970,7 +982,7 @@ function renderCadastroItens() {
     .map((i) => `<div class="item" data-id="${i.id}">
       <div class="info">
         <div class="nome">${esc(i.nome)}</div>
-        <div class="detalhe"><span>${esc(i.grupoNome || "Sem grupo")}</span><span>· ${esc(i.unidade)}</span>${i.marca ? `<span>· ${esc(i.marca)}</span>` : ""}</div>
+        <div class="detalhe"><span>${esc(i.grupoNome || "Sem grupo")}</span><span>· ${esc(i.unidade)}</span>${i.descricaoUnidade ? `<span>· ${esc(i.descricaoUnidade)}</span>` : ""}${i.marca ? `<span>· ${esc(i.marca)}</span>` : ""}</div>
       </div>
       <button class="btn-enviar-lista" data-id-enviar="${i.id}" aria-label="Enviar para lista pendente" title="Enviar para lista pendente">🛒</button>
     </div>`)
@@ -1047,8 +1059,9 @@ async function abrirItemDetalhe(item) {
   $("#item-detalhe-info").innerHTML =
     [
       ["Nome", item.nome],
-      ["Descrição", item.descricao || "—"],
       ["Marca", item.marca || "—"],
+      ["Descrição", item.descricao || "—"],
+      ["Descrição da unidade", item.descricaoUnidade || "—"],
       ["Grupo", item.grupoNome || "—"],
       ["Unidade", item.unidade],
     ].map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
@@ -1101,6 +1114,7 @@ function abrirFormNovoItem() {
   $("#fi-id").value = "";
   $("#fi-nome").value = "";
   $("#fi-descricao").value = "";
+  $("#fi-descricao-unidade").value = "";
   $("#fi-marca").value = "";
   $("#fi-grupo-nome").value = "";
   $("#fi-grupo-id").value = "";
@@ -1190,6 +1204,7 @@ function abrirFormEditarItem(item) {
   $("#fi-id").value = item.id;
   $("#fi-nome").value = item.nome;
   $("#fi-descricao").value = item.descricao || "";
+  $("#fi-descricao-unidade").value = item.descricaoUnidade || "";
   $("#fi-marca").value = item.marca || "";
   $("#fi-unidade").value = item.unidade;
   $("#fi-grupo-nome").value = item.grupoNome || "";
@@ -1216,8 +1231,8 @@ async function salvarItem() {
     return;
   }
   const dados = {
-    nome, descricao: $("#fi-descricao").value.trim() || null, marca: $("#fi-marca").value.trim() || null,
-    grupoId, grupoNome, unidade,
+    nome, descricao: $("#fi-descricao").value.trim() || null, descricaoUnidade: $("#fi-descricao-unidade").value.trim() || null,
+    marca: $("#fi-marca").value.trim() || null, grupoId, grupoNome, unidade,
   };
   $("#btn-salvar-item").disabled = true;
   try {

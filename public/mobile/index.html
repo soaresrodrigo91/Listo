@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Listo</title>
+<meta name="description" content="Listo — lista de compras compartilhada em tempo real, com comparação de preços por mercado.">
+<meta property="og:title" content="Listo — Lista de Compras Compartilhada">
+<meta property="og:description" content="Crie listas em conjunto, acompanhe alterações em tempo real, compare preços entre mercados e controle o que já foi comprado.">
+<meta property="og:image" content="https://listo-lyart.vercel.app/mobile/icons/icon-512.png">
+<meta property="og:url" content="https://listo-lyart.vercel.app/mobile">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 
 <link rel="manifest" href="/mobile/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -272,8 +279,9 @@
         <input id="fi-nome" type="text" autocomplete="off" placeholder="Digite nome do item...">
         <div class="autocomplete-lista hidden" id="fi-nome-sugestoes"></div>
       </div>
-      <div class="field"><label>Descrição</label><input id="fi-descricao" type="text" placeholder="Digite descrição: Integral, Sem glúten..."></div>
       <div class="field"><label>Marca</label><input id="fi-marca" type="text" placeholder="Digite a marca..."></div>
+      <div class="field"><label>Descrição</label><input id="fi-descricao" type="text" placeholder="Digite descrição: Integral, Sem glúten..."></div>
+      <div class="field"><label>Descrição da unidade</label><input id="fi-descricao-unidade" type="text" placeholder="Digite descrição da unidade: 400g, 200ml..."></div>
       <div class="linha-dupla">
         <div class="field" style="position:relative">
           <label>Grupo *</label>
@@ -493,6 +501,7 @@
       <div class="field"><label>Forma de pagamento *</label><select id="fin-forma"></select></div>
       <div class="field hidden" id="fin-parcelas-wrap"><label>Parcelas</label><input id="fin-parcelas" type="number" min="1" value="1"></div>
       <div class="field"><label>Valor total pago *</label><input id="fin-valor-total" type="text" inputmode="decimal" placeholder="0,00"></div>
+      <div id="aviso-pendentes-finalizar"></div>
       <div id="msg-finalizar"></div>
       <button class="btn" id="btn-confirmar-finalizar">Finalizar</button>
       <button class="btn-secundario" id="btn-cancelar-finalizar">Cancelar</button>
