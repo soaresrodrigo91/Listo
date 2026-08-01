@@ -741,6 +741,18 @@ function listaAbertaAtual() {
   return listasAtuais.find((l) => l.id === listaAbertaId);
 }
 
+// "Convidar Amigo" no menu: usa o share sheet nativo do celular quando disponível (deixa a
+// pessoa escolher WhatsApp, SMS, e-mail etc.); em navegador sem suporte, cai pro link do WhatsApp.
+function convidarAmigo() {
+  const link = `${window.location.origin}/mobile`;
+  const texto = `Estou usando o Listo pra organizar as compras de casa — cadastro de itens, comparação de preços por mercado e lista compartilhada em tempo real. Dá uma olhada: ${link}`;
+  if (navigator.share) {
+    navigator.share({ title: "Listo", text: texto, url: link }).catch(() => {});
+  } else {
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
+  }
+}
+
 function compartilharListaWhatsApp() {
   const lista = listaAbertaAtual();
   if (!lista) return;
@@ -1872,6 +1884,7 @@ function ligarEventos() {
     };
   });
   $("#menu-cadastros-toggle").onclick = alternarSubmenuCadastros;
+  $("#btn-convidar-amigo").onclick = () => { fecharMenu(); convidarAmigo(); };
   $("#btn-sair").onclick = () => {
     if (confirm("Tem certeza que deseja sair da sua conta?")) { fecharMenu(); signOut(auth); }
   };
