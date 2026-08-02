@@ -1461,6 +1461,10 @@ main::-webkit-scrollbar {
 .fab.fab-busca {
   right: 90px;
   font-size: 22px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--borda-glass);
+  box-shadow: 0 10px 24px var(--card-shadow);
 }
 .busca-cadastro-wrap {
   padding: 10px 16px 6px;
