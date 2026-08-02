@@ -694,26 +694,24 @@ textarea {
   align-items: center;
   gap: 8px;
   margin: 4px 0 14px;
-  padding-right: 40px;
 }
 .detalhe-nome-lista {
   font-size: 14px;
   font-weight: 500;
   color: var(--muted);
 }
-.btn-compartilhar-mini {
-  position: absolute;
-  top: 8px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
+.btn-compartilhar-card {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   color: var(--muted);
   background: var(--bg-soft);
+  flex-shrink: 0;
 }
-.btn-compartilhar-mini:active {
+.btn-compartilhar-card:active {
   transform: scale(0.92);
 }
 
@@ -1143,6 +1141,20 @@ main::-webkit-scrollbar {
   font-size: 11px;
   color: var(--muted);
 }
+.icone-pendente {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--status-vermelho) 55%, transparent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: -1px;
+}
 
 /* ---------- listas / itens ---------- */
 .lista {
@@ -1234,8 +1246,8 @@ main::-webkit-scrollbar {
   width: 28px;
   height: 28px;
   border-radius: 9px;
-  border: 1.5px solid var(--status-vermelho);
-  background: var(--status-vermelho);
+  border: 1.5px solid var(--line);
+  background: var(--bg-soft);
   display: grid;
   place-items: center;
   flex-shrink: 0;

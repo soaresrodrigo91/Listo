@@ -177,7 +177,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const avisoPosAtualizacao = sessionStorage.getItem("avisoPosAtualizacao");
   if (avisoPosAtualizacao) {
     sessionStorage.removeItem("avisoPosAtualizacao");
-    exibirSucesso(avisoPosAtualizacao);
+    exibirSucesso(avisoPosAtualizacao, 3000);
   }
 
   // Sem credenciais do Firebase ainda (FIREBASE_CONFIG vazio): mostra a tela de login para
@@ -242,13 +242,13 @@ function mostrarMsg(seletor, texto, tipo) {
 }
 
 let timeoutToastSucesso = null;
-function exibirSucesso(texto) {
+function exibirSucesso(texto, duracaoMs) {
   $("#toast-sucesso-texto").textContent = texto;
   $("#toast-sucesso").classList.remove("hidden");
   clearTimeout(timeoutToastSucesso);
   timeoutToastSucesso = setTimeout(() => {
     $("#toast-sucesso").classList.add("hidden");
-  }, 2000);
+  }, duracaoMs || 2000);
 }
 
 async function entrar() {
@@ -547,7 +547,7 @@ async function alterarSenha() {
 }
 // Sem Firebase Storage no projeto — fotos são redimensionadas no navegador e guardadas
 // como data URL (base64) direto no documento do Firestore, igual à foto de perfil.
-async function redimensionarImagem(arquivo, tamanhoMax) {
+async function redimensionarImagem(arquivo, tamanhoMax, qualidade) {
   const bitmap = await createImageBitmap(arquivo);
   const escala = Math.min(1, tamanhoMax / Math.max(bitmap.width, bitmap.height));
   const largura = Math.round(bitmap.width * escala);
@@ -556,7 +556,7 @@ async function redimensionarImagem(arquivo, tamanhoMax) {
   canvas.width = largura;
   canvas.height = altura;
   canvas.getContext("2d").drawImage(bitmap, 0, 0, largura, altura);
-  return canvas.toDataURL("image/jpeg", 0.8);
+  return canvas.toDataURL("image/jpeg", qualidade || 0.8);
 }
 async function salvarFotoPerfil(arquivo) {
   const texto = $("#pf-label-foto-texto");
@@ -726,13 +726,20 @@ function renderCarrosselListas() {
         </div>
         <div class="card-lista-resumo-itens">
           <span>✅ ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
-          <span>🔴 ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
+          <span><span class="icone-pendente">×</span> ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
+          <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
         </div>
       </div>`;
     })
     .join("");
   container.querySelectorAll(".card-lista").forEach((el) => {
     el.onclick = () => abrirListaDetalhe(listasAtuais.find((l) => l.id === el.dataset.id));
+  });
+  container.querySelectorAll(".btn-compartilhar-card").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      compartilharListaWhatsApp(listasAtuais.find((l) => l.id === btn.dataset.idCompartilhar));
+    };
   });
 }
 
@@ -908,10 +915,13 @@ async function verificarAtualizacao() {
   location.reload();
 }
 
-function compartilharListaWhatsApp() {
-  const lista = listaAbertaAtual();
+// Recebe a lista diretamente (em vez de depender de qual lista está "aberta" no momento) porque
+// agora é acionado a partir do resumo na tela "Listas de Compras", sem precisar entrar na lista.
+async function compartilharListaWhatsApp(lista) {
   if (!lista) return;
-  const linhas = [...itensListaAtuais]
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
+  const linhas = snap.docs
+    .map((d) => d.data())
     .sort((a, b) => (a.grupoNome || "").localeCompare(b.grupoNome || "") || a.nome.localeCompare(b.nome, "pt-BR"))
     .map((i) => `${i.comprado ? "✅" : "🔲"} ${i.nome} - ${i.quantidade}${i.unidade ? ` ${i.unidade}` : ""}`)
     .join("\n");
@@ -940,7 +950,7 @@ function renderListaDetalhe() {
   $("#lista-detalhe-cabecalho").innerHTML = `
     <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
-      <span>✅ ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · 🔴 ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
+      <span>✅ ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
     </div>`;
 
@@ -1381,7 +1391,10 @@ async function salvarFotoItemDetalhe(arquivo, labelId) {
   const textoOriginal = label.textContent;
   label.textContent = "Enviando...";
   try {
-    const dataUrl = await redimensionarImagem(arquivo, 480);
+    // A pré-visualização do item nunca passa de 140px na tela (item-foto-preview-grande) — 320px
+    // já cobre até telas de alta densidade sem carregar peso à toa; sem Storage no projeto, a foto
+    // vira base64 dentro do próprio documento do Firestore, então cada KB economizado importa.
+    const dataUrl = await redimensionarImagem(arquivo, 320, 0.65);
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", itemCatalogoAbertoId), { fotoUrl: dataUrl });
     renderImagemItemDetalhe(dataUrl);
   } catch {
@@ -2352,7 +2365,6 @@ function ligarEventos() {
     fecharFormAdicionarItem();
   });
   $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
-  $("#btn-compartilhar-lista").onclick = compartilharListaWhatsApp;
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
