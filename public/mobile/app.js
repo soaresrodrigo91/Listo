@@ -95,6 +95,27 @@ function renderOpcoesFracionavelUnidade() {
 function esc(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+// Usado ao salvar cadastros (item, lista, grupo, local, forma de pagamento, unidade) pra avisar
+// antes de criar um duplicado. Ignora acento/maiúscula e considera "parecido" quando um nome
+// contém o outro (ex.: "Arroz" bate com "Arroz Branco") — evita virar um comparador difuso complexo.
+function normalizarTexto(s) {
+  return (s || "").trim().toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
+}
+function encontrarNomeParecido(nome, lista, idAtual) {
+  const alvo = normalizarTexto(nome);
+  if (!alvo) return null;
+  return lista.find((item) => {
+    if (idAtual && item.id === idAtual) return false;
+    const existente = normalizarTexto(item.nome);
+    if (!existente) return false;
+    if (existente === alvo) return true;
+    return alvo.length >= 3 && existente.length >= 3 && (existente.includes(alvo) || alvo.includes(existente));
+  }) || null;
+}
+function confirmarApesarDeParecido(linhasDetalhe) {
+  const detalhe = linhasDetalhe.filter(Boolean).join("\n");
+  return confirm(`Já existe um cadastro com nome igual ou parecido:\n\n${detalhe}\n\nDeseja continuar e salvar mesmo assim?`);
+}
 function formatarTelefone(valor) {
   const digitos = valor.replace(/\D/g, "").slice(0, 11);
   if (digitos.length === 0) return "";
@@ -771,6 +792,16 @@ async function salvarLista() {
   if (!nome) {
     mostrarMsg("#msg-form-lista", "Preencha o nome da lista.", "erro");
     return;
+  }
+  const parecida = encontrarNomeParecido(nome, listasAtuais, id);
+  if (parecida) {
+    const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[parecida.status || "pendente"];
+    const confirma = confirmarApesarDeParecido([
+      `Nome: ${parecida.nome}`,
+      `Status: ${parecida.permanente ? "Permanente" : rotuloStatus}`,
+      parecida.observacoes ? `Observações: ${parecida.observacoes}` : null,
+    ]);
+    if (!confirma) return;
   }
   $("#btn-salvar-lista").disabled = true;
   try {
@@ -1628,6 +1659,17 @@ async function salvarItem() {
     mostrarMsg("#msg-form-item", "Digite a unidade e selecione uma das sugestões.", "erro");
     return;
   }
+  const parecido = encontrarNomeParecido(nome, itensAtuais, id);
+  if (parecido) {
+    const confirma = confirmarApesarDeParecido([
+      `Nome: ${parecido.nome}`,
+      parecido.marca ? `Marca: ${parecido.marca}` : null,
+      `Grupo: ${parecido.grupoNome || "—"}`,
+      `Unidade: ${parecido.unidade || "—"}`,
+      parecido.valor ? `Valor: ${formatarMoeda(parecido.valor)}` : null,
+    ]);
+    if (!confirma) return;
+  }
   const dados = {
     nome, descricao: $("#fi-descricao").value.trim() || null, descricaoUnidade: $("#fi-descricao-unidade").value.trim() || null,
     valor: paraNumero($("#fi-valor").value), marca: $("#fi-marca").value.trim() || null, grupoId, grupoNome, unidade,
@@ -1692,6 +1734,14 @@ async function salvarGrupo() {
   if (!nome) {
     mostrarMsg("#msg-form-grupo", "Informe o nome do grupo.", "erro");
     return;
+  }
+  const parecido = encontrarNomeParecido(nome, gruposAtuais, id);
+  if (parecido) {
+    const confirma = confirmarApesarDeParecido([
+      `Nome: ${parecido.nome}`,
+      parecido.descricao ? `Descrição: ${parecido.descricao}` : null,
+    ]);
+    if (!confirma) return;
   }
   const dados = { nome, descricao: $("#fg-descricao").value.trim() || null };
   if (id) {
@@ -1856,6 +1906,15 @@ async function salvarLocal() {
     mostrarMsg("#msg-form-local", "Informe o nome do local.", "erro");
     return;
   }
+  const parecido = encontrarNomeParecido(nome, locaisAtuais, id);
+  if (parecido) {
+    const confirma = confirmarApesarDeParecido([
+      `Nome: ${parecido.nome}`,
+      parecido.endereco ? `Endereço: ${parecido.endereco}` : null,
+      parecido.cidade ? `Cidade: ${parecido.cidade}` : null,
+    ]);
+    if (!confirma) return;
+  }
   let site = $("#fl-site").value.trim() || null;
   if (site && !/^https?:\/\//i.test(site)) site = `https://${site}`;
   const dados = { nome, endereco: $("#fl-endereco").value.trim() || null, cidade: $("#fl-cidade").value.trim() || null, site };
@@ -1923,6 +1982,8 @@ async function salvarForma() {
     mostrarMsg("#msg-form-forma", "Informe o nome da forma de pagamento.", "erro");
     return;
   }
+  const parecida = encontrarNomeParecido(nome, formasAtuais, id);
+  if (parecida && !confirmarApesarDeParecido([`Nome: ${parecida.nome}`])) return;
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "formasPagamento", id), { nome });
   } else {
@@ -1988,6 +2049,14 @@ async function salvarUnidade() {
   if (!fracionavelUnidadeSelecionado) {
     mostrarMsg("#msg-form-unidade", "Selecione se a unidade aceita quantidade fracionada.", "erro");
     return;
+  }
+  const parecida = encontrarNomeParecido(nome, unidadesAtuais, id);
+  if (parecida) {
+    const confirma = confirmarApesarDeParecido([
+      `Nome: ${parecida.nome}`,
+      `Aceita fração: ${parecida.fracionavel ? "Sim" : "Não"}`,
+    ]);
+    if (!confirma) return;
   }
   const dados = { nome, fracionavel: fracionavelUnidadeSelecionado === "sim" };
   if (id) {
