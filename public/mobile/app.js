@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
-  query, where, serverTimestamp, writeBatch, increment, arrayUnion,
+  query, where, serverTimestamp, writeBatch, increment, arrayUnion, waitForPendingWrites,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Projeto Firebase PRÓPRIO deste app — nunca o mesmo projeto/banco do Controle Financeiro.
@@ -174,6 +174,12 @@ let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais 
 window.addEventListener("DOMContentLoaded", () => {
   ligarEventos();
 
+  const avisoPosAtualizacao = sessionStorage.getItem("avisoPosAtualizacao");
+  if (avisoPosAtualizacao) {
+    sessionStorage.removeItem("avisoPosAtualizacao");
+    exibirSucesso(avisoPosAtualizacao);
+  }
+
   // Sem credenciais do Firebase ainda (FIREBASE_CONFIG vazio): mostra a tela de login para
   // conferência visual do layout, mas sem tentar autenticar de verdade.
   if (!FIREBASE_CONFIG.apiKey) {
@@ -194,6 +200,7 @@ window.addEventListener("DOMContentLoaded", () => {
       assinarUsuarioEEspaco(u.uid);
       assinarConvitesRecebidos();
       assinarNotificacoes();
+      avisarSeNovaVersaoDisponivel();
       $("#carregando").classList.add("hidden");
       $("#tela-login").classList.add("hidden");
       $("#tela-cadastro").classList.add("hidden");
@@ -218,6 +225,13 @@ window.addEventListener("DOMContentLoaded", () => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/mobile/sw.js").catch(() => {});
   }
+
+  // Reabrir o app depois de um tempo em segundo plano é o momento mais comum de estar
+  // rodando uma versão desatualizada (o PWA fica suspenso na memória sem recarregar sozinho).
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") avisarSeNovaVersaoDisponivel();
+  });
+  setInterval(avisarSeNovaVersaoDisponivel, 30 * 60 * 1000);
 });
 
 /* ---------- login / cadastro ---------- */
@@ -816,10 +830,79 @@ function convidarAmigo() {
   const link = `${window.location.origin}/mobile`;
   const texto = `🛒 Estou usando este app de lista de compras compartilhada e achei muito prático! Com ele podemos criar listas em conjunto, acompanhar alterações em tempo real, comparar preços entre mercados e controlar o que já foi comprado ou ainda está pendente. Experimente! ${link}`;
   if (navigator.share) {
-    navigator.share({ title: "Listo", text: texto, url: link }).catch(() => {});
+    navigator.share({ title: "Listô", text: texto, url: link }).catch(() => {});
   } else {
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
   }
+}
+
+// Busca o index.html direto do servidor (sem cache) pra ler a versão publicada
+// (id="app-versao", incrementada a cada commit). Retorna null se não conseguir checar.
+async function buscarVersaoServidor() {
+  if (!navigator.onLine) return null;
+  try {
+    const resp = await fetch(`/mobile/index.html?t=${Date.now()}`, { cache: "no-store" });
+    const html = await resp.text();
+    return html.match(/id="app-versao">([^<]+)</)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+// Checagem silenciosa (chamada no login, ao voltar pro app e periodicamente): se encontrar uma
+// versão publicada diferente da que está rodando, avisa no sino de notificações — mas NÃO
+// aplica a atualização sozinha. A troca de versão só acontece quando a pessoa toca em
+// "Atualização" no menu (verificarAtualizacao). Usa localStorage pra avisar só uma vez por versão.
+async function avisarSeNovaVersaoDisponivel() {
+  if (!usuario || !bd) return;
+  const versaoServidor = await buscarVersaoServidor();
+  const versaoAtual = $("#app-versao")?.textContent?.trim();
+  if (!versaoServidor || versaoServidor === versaoAtual) return;
+  if (localStorage.getItem("versaoAvisada") === versaoServidor) return;
+  localStorage.setItem("versaoAvisada", versaoServidor);
+  try {
+    await addDoc(collection(bd, "notificacoes"), {
+      tipo: "atualizacao_disponivel", uidDestino: usuario.uid, espacoId: espacoIdAtual,
+      mensagem: `Uma nova versão do Listô está disponível (${versaoServidor}). Toque em "Atualização" no menu para instalar.`,
+      criadoEm: serverTimestamp(), lida: false,
+    });
+  } catch {
+    // checagem em segundo plano: falha ao gravar a notificação não deve incomodar o usuário
+  }
+}
+
+// "Atualização" no menu: compara a versão publicada com a que está rodando na tela. Se houver
+// diferença, espera qualquer gravação pendente no Firestore terminar de sincronizar, limpa o
+// cache do service worker e recarrega — assim a pessoa não precisa criar um novo atalho pra
+// receber a versão nova.
+async function verificarAtualizacao() {
+  if (!navigator.onLine) {
+    exibirSucesso("Sem conexão para verificar atualizações.");
+    return;
+  }
+  const versaoServidor = await buscarVersaoServidor();
+  const versaoAtual = $("#app-versao")?.textContent?.trim();
+
+  if (!versaoServidor) {
+    exibirSucesso("Não foi possível verificar atualizações agora. Tente novamente.");
+    return;
+  }
+  if (versaoServidor === versaoAtual) {
+    exibirSucesso(`O Listô já está com a versão mais atualizada (${versaoAtual}).`);
+    return;
+  }
+
+  if (bd) await waitForPendingWrites(bd).catch(() => {});
+
+  if ("caches" in window) {
+    const nomes = await caches.keys();
+    await Promise.all(nomes.map((n) => caches.delete(n)));
+  }
+  const registro = await navigator.serviceWorker?.getRegistration();
+  if (registro) await registro.update();
+
+  sessionStorage.setItem("avisoPosAtualizacao", `Listô foi atualizado para a versão ${versaoServidor}.`);
+  location.reload();
 }
 
 function compartilharListaWhatsApp() {
@@ -899,8 +982,12 @@ function renderListaDetalhe() {
       btn.onclick = async (e) => {
         e.stopPropagation();
         const id = btn.closest(".item").dataset.id;
+        const item = itensListaAtuais.find((i) => i.id === id);
+        const nomeItem = item?.nome ?? "";
+        if (!confirm(`Remover "${nomeItem}" da lista?`)) return;
         await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", id));
         recalcularTotaisLista();
+        exibirSucesso(`Item "${nomeItem}" removido da lista.`);
       };
     });
     container.querySelectorAll('[data-acao="qtd"]').forEach((btn) => {
@@ -1936,7 +2023,13 @@ function renderNotificacoes() {
   container.querySelectorAll(".notif-item").forEach((el) => {
     el.addEventListener("click", (e) => {
       if (e.target.closest(".btn-excluir-notif")) return;
-      irParaTela("compartilhadas");
+      const notif = notificacoesAtuais.find((n) => n.id === el.dataset.id);
+      if (notif?.tipo === "atualizacao_disponivel") {
+        irParaTela(telaAnterior);
+        abrirMenu();
+      } else {
+        irParaTela("compartilhadas");
+      }
     });
   });
   container.querySelectorAll(".btn-excluir-notif").forEach((btn) => {
@@ -2080,7 +2173,7 @@ function abrirPerfil() {
 const ONBOARDING_PASSOS = [
   {
     icone: "🛒",
-    titulo: "Bem-vindo(a) ao Listo!",
+    titulo: "Bem-vindo(a) ao Listô!",
     corpo: "Seu <b>espaço de compras</b>: tudo que você cadastrar pode ser compartilhado com quem você convidar.",
   },
   {
@@ -2179,6 +2272,7 @@ function ligarEventos() {
   });
   $("#menu-cadastros-toggle").onclick = alternarSubmenuCadastros;
   $("#btn-convidar-amigo").onclick = () => { fecharMenu(); convidarAmigo(); };
+  $("#btn-atualizacao").onclick = () => { fecharMenu(); verificarAtualizacao(); };
   $("#btn-sair").onclick = () => {
     if (confirm("Tem certeza que deseja sair da sua conta?")) { fecharMenu(); signOut(auth); }
   };

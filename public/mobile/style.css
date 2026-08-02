@@ -527,7 +527,7 @@ textarea {
 }
 .menu-secao {
   padding: 12px 12px 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -555,7 +555,7 @@ textarea {
   gap: 12px;
   padding: 11px 12px;
   border-radius: 12px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--muted);
   text-align: left;
@@ -563,7 +563,7 @@ textarea {
 }
 .menu-item.menu-sub {
   padding: 9px 10px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   border-radius: 10px;
 }
 .menu-item.menu-sub .icone {
@@ -876,7 +876,7 @@ main::-webkit-scrollbar {
   letter-spacing: -0.5px;
 }
 .saudacao p {
-  color: var(--muted);
+  color: var(--primary);
   font-size: 13px;
   margin-top: 2px;
 }
@@ -897,6 +897,7 @@ main::-webkit-scrollbar {
 .card-resumo {
   background: var(--superficie-glass), var(--card);
   border: 1px solid var(--borda-glass);
+  border-left: 3px solid color-mix(in srgb, var(--primary) 45%, transparent);
   border-radius: var(--radius);
   padding: 14px;
   display: flex;
@@ -925,6 +926,7 @@ main::-webkit-scrollbar {
 .rotulo-icone {
   font-size: 13px;
   line-height: 1;
+  color: var(--primary);
 }
 .card-resumo .valor {
   font-family: "Sora";
@@ -1110,6 +1112,9 @@ main::-webkit-scrollbar {
   font-weight: 700;
   font-size: 14px;
   color: var(--text);
+}
+#lista-detalhe-cabecalho .card-lista-rodape {
+  font-size: 13px;
 }
 .card-lista-resumo-itens {
   display: flex;
