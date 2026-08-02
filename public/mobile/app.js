@@ -162,6 +162,7 @@ let listaAbertaId = null;
 let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
 let ultimoLocalUsadoId = null;
+let localMaisUsadoId = null;
 let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroGrupoItens = null;
 let fracionavelUnidadeSelecionado = null;
@@ -820,6 +821,7 @@ function abrirListaDetalhe(lista) {
   listaAbertaId = lista.id;
   filtroGrupoLista = null;
   ultimoLocalUsadoId = null;
+  carregarLocalMaisUsado();
   telaAnterior = "listas";
   if (unsubItensLista) unsubItensLista();
   unsubItensLista = onSnapshot(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"), (snap) => {
@@ -1169,11 +1171,25 @@ async function confirmarQuantidade() {
 }
 
 /* ---------- marcar item como comprado (modal local + valor) ---------- */
+// Ranking de locais mais usados (mesma contagem já usada no dashboard "Locais mais utilizados"),
+// carregado ao abrir a lista pra sugerir um local antes mesmo de marcar o primeiro item.
+async function carregarLocalMaisUsado() {
+  try {
+    const snap = await getDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"));
+    const locais = snap.exists() ? snap.data().locais || {} : {};
+    const entradas = Object.entries(locais).sort((a, b) => b[1] - a[1]);
+    localMaisUsadoId = entradas.length ? entradas[0][0] : null;
+  } catch {
+    localMaisUsadoId = null;
+  }
+}
 function abrirModalComprar(itemListaId) {
   itemListaPendenteId = itemListaId;
   $("#mc-valor").value = "";
-  // Lembra o último local usado nesta sessão de compras: assim só falta informar o valor a cada item.
-  if (ultimoLocalUsadoId) $("#mc-local").value = ultimoLocalUsadoId;
+  // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
+  // lembrando o último local escolhido (só falta informar o valor a cada item seguinte).
+  const localSugerido = ultimoLocalUsadoId || localMaisUsadoId;
+  if (localSugerido) $("#mc-local").value = localSugerido;
   mostrarMsg("#msg-comprar", "", "");
   $("#overlay-comprar").classList.remove("hidden");
 }

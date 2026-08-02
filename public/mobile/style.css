@@ -1145,15 +1145,16 @@ main::-webkit-scrollbar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
+  width: 1.15em;
+  height: 1.15em;
   border-radius: 3px;
   background: color-mix(in srgb, var(--status-vermelho) 55%, transparent);
   color: #fff;
-  font-size: 10px;
+  font-size: 0.85em;
   font-weight: 700;
   line-height: 1;
-  vertical-align: -1px;
+  vertical-align: middle;
+  margin-top: -0.15em;
 }
 
 /* ---------- listas / itens ---------- */
