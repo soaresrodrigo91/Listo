@@ -55,6 +55,12 @@ service cloud.firestore {
         (request.resource.data.tipo == "convite_aceito"
           && get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.auth.token.email.lower())).data.status == "pendente"
           && request.resource.data.uidDestino == get(/databases/$(database)/documents/convites/$(request.resource.data.espacoId + "_" + request.auth.token.email.lower())).data.deUid)
+        ||
+        // tipo "item_adicionado_lista": membro do espaço notifica os demais membros ao adicionar
+        // um item numa lista — autor e destinatário precisam ser membros do mesmo espaço.
+        (request.resource.data.tipo == "item_adicionado_lista"
+          && request.auth.uid in get(/databases/$(database)/documents/espacos/$(request.resource.data.espacoId)).data.membros
+          && request.resource.data.uidDestino in get(/databases/$(database)/documents/espacos/$(request.resource.data.espacoId)).data.membros)
       );
 
       allow delete: if request.auth != null && resource.data.uidDestino == request.auth.uid;

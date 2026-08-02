@@ -866,6 +866,20 @@ async function ultimoValorConhecido(itemId) {
   return maisRecente.valor || 0;
 }
 
+// Avisa os demais membros do espaço compartilhado (nunca o próprio autor da ação) via o sino de notificações.
+async function notificarMembrosEspaco(mensagem) {
+  const membros = (espacoAtual.membros || []).filter((uid) => uid !== usuario.uid);
+  if (membros.length === 0) return;
+  const batch = writeBatch(bd);
+  membros.forEach((uid) => {
+    batch.set(doc(collection(bd, "notificacoes")), {
+      tipo: "item_adicionado_lista", uidDestino: uid, espacoId: espacoIdAtual,
+      mensagem, criadoEm: serverTimestamp(), lida: false,
+    });
+  });
+  await batch.commit();
+}
+
 function fecharFormAdicionarItem() {
   $("#ld-item-nome").value = "";
   $("#ld-item-id").value = "";
@@ -895,6 +909,8 @@ async function adicionarItemNaLista() {
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
   recalcularTotaisLista();
+  const listaAtual = listaAbertaAtual();
+  notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${item.nome}" à lista "${listaAtual?.nome || ""}".`);
   fecharFormAdicionarItem();
   exibirSucesso("Item adicionado à lista!");
 }
@@ -1119,6 +1135,8 @@ async function enviarItemParaLista(item, listaId) {
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
   await recalcularTotaisLista(listaId);
+  const nomeLista = listasAtuais.find((l) => l.id === listaId)?.nome || "";
+  notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${item.nome}" à lista "${nomeLista}".`);
   fecharPickerEnviarLista();
   exibirSucesso("Item enviado para a lista!");
 }
