@@ -192,6 +192,11 @@ textarea {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.field input:read-only {
+  background: var(--bg);
+  color: var(--muted);
+  cursor: default;
+}
 .field input[type="date"] {
   font-size: 13px;
   padding-left: 12px;
@@ -616,6 +621,9 @@ textarea {
   background: var(--bg);
   border-bottom: 1px solid var(--line);
   padding-bottom: 4px;
+}
+#lista-detalhe-cabecalho {
+  padding: 0 16px;
 }
 .filtros-chip {
   display: flex;

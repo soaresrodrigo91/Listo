@@ -105,7 +105,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.29</div>
+      <div class="menu-versao" id="app-versao">01.30</div>
     </div>
   </aside>
 
@@ -284,6 +284,7 @@
       <div class="field"><label>Marca</label><input id="fi-marca" type="text" placeholder="Digite a marca..."></div>
       <div class="field"><label>Descrição</label><input id="fi-descricao" type="text" placeholder="Digite descrição: Integral, Sem glúten..."></div>
       <div class="field"><label>Descrição da unidade</label><input id="fi-descricao-unidade" type="text" placeholder="Digite descrição da unidade: 400g, 200ml..."></div>
+      <div class="field"><label>Valor</label><input id="fi-valor" type="text" inputmode="decimal" placeholder="0,00"></div>
       <div class="linha-dupla">
         <div class="field" style="position:relative">
           <label>Grupo *</label>
@@ -459,6 +460,10 @@
           <button type="button" class="chave" id="chave-tema-escuro" role="switch" aria-checked="false"><span class="chave-bolinha"></span></button>
         </div>
       </div>
+      <div class="field" style="margin-top:18px">
+        <label>Valor provisionado ao adicionar item na lista</label>
+        <div class="filtros-chip" id="opcoes-valor-provisionado" style="padding:10px 0 0"></div>
+      </div>
     </main>
   </div>
 
@@ -500,7 +505,7 @@
   <div class="overlay-mes hidden" id="overlay-quantidade">
     <div class="cartao-mes">
       <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Alterar quantidade</h3>
-      <div class="field"><label>Quantidade *</label><input id="qtd-valor" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+      <div class="field"><label id="qtd-label">Quantidade *</label><input id="qtd-valor" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
       <div id="msg-quantidade"></div>
       <button class="btn" id="btn-confirmar-quantidade">Salvar</button>
       <button class="btn-secundario" id="btn-cancelar-quantidade">Cancelar</button>
@@ -513,7 +518,7 @@
       <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Finalizar compra</h3>
       <div class="field"><label>Forma de pagamento *</label><select id="fin-forma"></select></div>
       <div class="field hidden" id="fin-parcelas-wrap"><label>Parcelas</label><input id="fin-parcelas" type="number" min="1" value="1"></div>
-      <div class="field"><label>Valor total pago *</label><input id="fin-valor-total" type="text" inputmode="decimal" placeholder="0,00"></div>
+      <div class="field"><label>Valor total pago (itens comprados)</label><input id="fin-valor-total" type="text" readonly></div>
       <div id="aviso-pendentes-finalizar"></div>
       <div id="msg-finalizar"></div>
       <button class="btn" id="btn-confirmar-finalizar">Finalizar</button>

@@ -44,6 +44,12 @@ function paraNumero(texto) {
   const n = Number(limpo);
   return Number.isFinite(n) ? n : 0;
 }
+// Unidades "de peso/volume" aceitam quantidade fracionada (ex: 400,50g); as demais (Unidade,
+// Caixa, Dúzia, Pacote...) são sempre contáveis em números inteiros.
+const UNIDADES_FRACIONAVEIS = new Set(["grama", "gramas", "g", "kg", "quilo", "quilos", "quilograma", "quilogramas", "ml", "mililitro", "mililitros", "litro", "litros", "l"]);
+function unidadeAceitaFracao(nomeUnidade) {
+  return UNIDADES_FRACIONAVEIS.has((nomeUnidade || "").trim().toLowerCase());
+}
 function esc(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -536,6 +542,7 @@ function renderSugestoesItemLista(query) {
       $("#ld-item-nome").value = item.nome;
       $("#ld-item-id").value = item.id;
       $("#ld-unidade").value = item.unidade || "";
+      $("#ld-quantidade").step = unidadeAceitaFracao(item.unidade) ? "0.01" : "1";
       container.classList.add("hidden");
       container.innerHTML = "";
     };
@@ -817,7 +824,7 @@ function renderListaDetalhe() {
         <button class="chk" data-acao="marcar">✓</button>
         <div class="info">
           <div class="nome">${esc(i.nome)}</div>
-          <div class="detalhe"><button class="btn-qtd" data-acao="qtd">${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""} ✎</button>${i.comprado ? `<span>· ${esc(locaisAtuais.find((l) => l.id === i.localCompraId)?.nome || "")}</span>` : ""}${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
+          <div class="detalhe"><button class="btn-qtd" data-acao="qtd">${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""} ✎</button>${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
         </div>
         <div class="valor-linha">
           <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/un.</span>
@@ -860,12 +867,41 @@ function renderListaDetalhe() {
   $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
 }
 
-// Sem campo manual de valor provisionado: usa o preço mais recente já registrado pra esse
-// item (qualquer local) como estimativa — se nunca foi comprado, fica em 0 até a 1ª compra.
-async function ultimoValorConhecido(itemId) {
-  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", itemId, "historicoPrecos"));
+// Preferência (Configurações) de qual valor usar como estimativa ao adicionar um item numa lista:
+// valor cadastrado no item, último valor comprado (qualquer local) ou o mais barato já registrado.
+const OPCOES_VALOR_PROVISIONADO = [
+  { valor: "cadastro", rotulo: "Valor do cadastro" },
+  { valor: "ultimo", rotulo: "Último valor comprado" },
+  { valor: "barato", rotulo: "Valor mais barato" },
+];
+function preferenciaValorProvisionado() {
+  try { return localStorage.getItem("prefValorProvisionado") || "ultimo"; } catch { return "ultimo"; }
+}
+function renderOpcoesValorProvisionado() {
+  const atual = preferenciaValorProvisionado();
+  const container = $("#opcoes-valor-provisionado");
+  container.innerHTML = OPCOES_VALOR_PROVISIONADO
+    .map((o) => `<button type="button" class="chip ${o.valor === atual ? "ativo" : ""}" data-valor="${o.valor}">${esc(o.rotulo)}</button>`)
+    .join("");
+  container.querySelectorAll(".chip").forEach((btn) => {
+    btn.onclick = () => {
+      try { localStorage.setItem("prefValorProvisionado", btn.dataset.valor); } catch {}
+      renderOpcoesValorProvisionado();
+    };
+  });
+}
+// Se nunca foi comprado (sem histórico), sempre fica em 0, independente da preferência.
+async function valorProvisionadoParaItem(item) {
+  const preferencia = preferenciaValorProvisionado();
+  if (preferencia === "cadastro") return item.valor || 0;
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
   if (snap.empty) return 0;
-  const maisRecente = snap.docs.map((d) => d.data()).sort((a, b) => b.data.localeCompare(a.data))[0];
+  const registros = snap.docs.map((d) => d.data());
+  if (preferencia === "barato") {
+    const valores = registros.map((r) => r.valor || 0).filter((v) => v > 0);
+    return valores.length ? Math.min(...valores) : 0;
+  }
+  const maisRecente = registros.sort((a, b) => b.data.localeCompare(a.data))[0];
   return maisRecente.valor || 0;
 }
 
@@ -902,8 +938,9 @@ async function adicionarItemNaLista() {
   }
   // Campo nativo type="number": .value já vem com ponto decimal (não vírgula), então lê direto
   // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
-  const quantidade = Number($("#ld-quantidade").value) || 1;
-  const valorProvisionado = await ultimoValorConhecido(itemId);
+  let quantidade = Number($("#ld-quantidade").value) || 1;
+  if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
+  const valorProvisionado = await valorProvisionadoParaItem(item);
   const adicionadoPorNome = nomeExibicaoUsuario();
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
     itemId, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
@@ -937,6 +974,9 @@ function abrirModalQuantidade(itemListaId) {
   if (!item) return;
   itemListaPendenteId = itemListaId;
   $("#qtd-valor").value = item.quantidade;
+  const fracionavel = unidadeAceitaFracao(item.unidade);
+  $("#qtd-valor").step = fracionavel ? "0.01" : "1";
+  $("#qtd-label").textContent = `Quantidade${item.unidade ? ` (${item.unidade})` : ""} *`;
   mostrarMsg("#msg-quantidade", "", "");
   $("#overlay-quantidade").classList.remove("hidden");
 }
@@ -945,13 +985,14 @@ function fecharModalQuantidade() {
   itemListaPendenteId = null;
 }
 async function confirmarQuantidade() {
-  const quantidade = Number($("#qtd-valor").value);
+  const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
+  if (!item) return;
+  let quantidade = Number($("#qtd-valor").value);
+  if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
   if (!quantidade || quantidade <= 0) {
     mostrarMsg("#msg-quantidade", "Informe uma quantidade válida.", "erro");
     return;
   }
-  const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
-  if (!item) return;
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     quantidade, subtotal: quantidade * (item.valorProvisionado || 0),
   });
@@ -1005,12 +1046,16 @@ async function desmarcarComprado(item) {
 }
 
 /* ---------- finalizar compra ---------- */
+// Total real da compra: soma do que foi de fato pago nos itens já marcados (quantidade × valor
+// pago), nunca o valor provisionado dos itens ainda pendentes — por isso o campo é travado.
+function calcularTotalItensComprados(itens) {
+  return itens.filter((i) => i.comprado).reduce((s, i) => s + (i.quantidade || 0) * (i.valorPago ?? i.valorProvisionado ?? 0), 0);
+}
 function abrirModalFinalizar() {
   $("#fin-parcelas").value = "1";
   $("#fin-parcelas-wrap").classList.add("hidden");
-  $("#fin-valor-total").value = "";
   const lista = listaAbertaAtual();
-  if (lista) $("#fin-valor-total").value = formatarMoeda(lista.valorProvisionadoTotal || 0);
+  $("#fin-valor-total").value = formatarMoeda(calcularTotalItensComprados(itensListaAtuais));
   mostrarMsg("#msg-finalizar", "", "");
   const pendentes = lista ? lista.qtdItens - lista.qtdComprados : 0;
   mostrarMsg(
@@ -1025,18 +1070,23 @@ function fecharModalFinalizar() {
 }
 async function confirmarFinalizar() {
   const formaId = $("#fin-forma").value;
-  const valorTotalPago = paraNumero($("#fin-valor-total").value);
-  if (!formaId || valorTotalPago <= 0) {
-    mostrarMsg("#msg-finalizar", "Selecione a forma de pagamento e informe o valor total pago.", "erro");
+  if (!formaId) {
+    mostrarMsg("#msg-finalizar", "Selecione a forma de pagamento.", "erro");
+    return;
+  }
+  // Grava o histórico de preços agora (não no check individual): só os itens efetivamente
+  // marcados como comprados entram; os pendentes simplesmente mantêm o histórico anterior.
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"));
+  const todosItens = snap.docs.map((d) => d.data());
+  const valorTotalPago = calcularTotalItensComprados(todosItens);
+  if (valorTotalPago <= 0) {
+    mostrarMsg("#msg-finalizar", "Nenhum item foi marcado como comprado ainda.", "erro");
     return;
   }
   if (!confirm("Deseja realmente finalizar esta compra?")) return;
   const forma = formasAtuais.find((f) => f.id === formaId);
   const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
-  // Grava o histórico de preços agora (não no check individual): só os itens efetivamente
-  // marcados como comprados entram; os pendentes simplesmente mantêm o histórico anterior.
-  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"));
-  const comprados = snap.docs.map((d) => d.data()).filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
+  const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
   await Promise.all(comprados.map((i) => addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
     localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
   })));
@@ -1095,6 +1145,7 @@ async function abrirPickerEnviarLista(item) {
   if (!item) return;
   $("#titulo-enviar-lista").textContent = `Enviar "${item.nome}" para qual lista?`;
   $("#env-quantidade").value = "1";
+  $("#env-quantidade").step = unidadeAceitaFracao(item.unidade) ? "0.01" : "1";
   const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
   const container = $("#lista-opcoes-enviar");
   mostrarMsg("#msg-enviar-lista", "", "");
@@ -1130,9 +1181,10 @@ async function enviarItemParaLista(item, listaId) {
     mostrarMsg("#msg-enviar-lista", `${item.nome} já está na lista "${nomeLista}".`, "erro");
     return;
   }
-  const quantidade = Number($("#env-quantidade").value) || 1;
+  let quantidade = Number($("#env-quantidade").value) || 1;
+  if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
   const adicionadoPorNome = nomeExibicaoUsuario();
-  const valorProvisionado = await ultimoValorConhecido(item.id);
+  const valorProvisionado = await valorProvisionadoParaItem(item);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
     itemId: item.id, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
@@ -1175,6 +1227,7 @@ async function abrirItemDetalhe(item, origemTela) {
       ["Marca", item.marca || "—"],
       ["Descrição", item.descricao || "—"],
       ["Descrição da unidade", item.descricaoUnidade || "—"],
+      ["Valor", item.valor ? formatarMoeda(item.valor) : "—"],
       ["Grupo", item.grupoNome || "—"],
       ["Unidade", item.unidade],
     ].map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
@@ -1228,6 +1281,7 @@ function abrirFormNovoItem() {
   $("#fi-nome").value = "";
   $("#fi-descricao").value = "";
   $("#fi-descricao-unidade").value = "";
+  $("#fi-valor").value = "";
   $("#fi-marca").value = "";
   $("#fi-grupo-nome").value = "";
   $("#fi-grupo-id").value = "";
@@ -1318,6 +1372,7 @@ function abrirFormEditarItem(item) {
   $("#fi-nome").value = item.nome;
   $("#fi-descricao").value = item.descricao || "";
   $("#fi-descricao-unidade").value = item.descricaoUnidade || "";
+  $("#fi-valor").value = item.valor ? formatarMoeda(item.valor) : "";
   $("#fi-marca").value = item.marca || "";
   $("#fi-unidade").value = item.unidade;
   $("#fi-grupo-nome").value = item.grupoNome || "";
@@ -1345,7 +1400,7 @@ async function salvarItem() {
   }
   const dados = {
     nome, descricao: $("#fi-descricao").value.trim() || null, descricaoUnidade: $("#fi-descricao-unidade").value.trim() || null,
-    marca: $("#fi-marca").value.trim() || null, grupoId, grupoNome, unidade,
+    valor: paraNumero($("#fi-valor").value), marca: $("#fi-marca").value.trim() || null, grupoId, grupoNome, unidade,
   };
   $("#btn-salvar-item").disabled = true;
   try {
@@ -2181,8 +2236,9 @@ function ligarEventos() {
     aplicarTema(escuro);
   };
 
-  ["#mc-valor", "#fin-valor-total"].forEach(ligarMascaraMoeda);
+  ["#mc-valor", "#fi-valor"].forEach(ligarMascaraMoeda);
   ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
+  renderOpcoesValorProvisionado();
 
   $("#btn-onboarding-proximo").onclick = () => {
     if (onboardingPassoAtual === ONBOARDING_PASSOS.length - 1) concluirOnboarding();
