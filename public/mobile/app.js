@@ -2215,9 +2215,11 @@ function renderNotificacoes() {
       if (notif?.tipo === "atualizacao_disponivel") {
         irParaTela(telaAnterior);
         abrirMenu();
-      } else {
+      } else if (notif?.tipo === "convite_recebido" || notif?.tipo === "convite_aceito") {
         irParaTela("compartilhadas");
       }
+      // Demais tipos (item/grupo/lista cadastrados etc.): só exibe a mensagem — abrir a tela de
+      // notificações já marca tudo como lida, então clicar aqui não precisa levar a lugar nenhum.
     });
   });
   container.querySelectorAll(".btn-excluir-notif").forEach((btn) => {
