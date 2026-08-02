@@ -1672,6 +1672,7 @@ async function salvarItem() {
       parecido.marca ? `Marca: ${parecido.marca}` : null,
       `Grupo: ${parecido.grupoNome || "—"}`,
       `Unidade: ${parecido.unidade || "—"}`,
+      parecido.descricaoUnidade ? `Descrição da unidade: ${parecido.descricaoUnidade}` : null,
       parecido.valor ? `Valor: ${formatarMoeda(parecido.valor)}` : null,
     ]);
     if (!confirma) return;
