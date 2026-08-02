@@ -852,7 +852,7 @@ function renderListaDetalhe() {
       el.onclick = () => {
         const itemLista = itensListaAtuais.find((i) => i.id === el.dataset.id);
         const itemCatalogo = itensAtuais.find((i) => i.id === itemLista?.itemId);
-        if (itemCatalogo) abrirItemDetalhe(itemCatalogo, "listas");
+        if (itemCatalogo) abrirItemDetalhe(itemCatalogo, "lista-detalhe");
       };
     });
   }
@@ -2020,8 +2020,15 @@ function ligarEventos() {
   $("#btn-criar-conta").onclick = criarConta;
 
   $("#btn-menu").onclick = () => {
-    if ($("#btn-menu").classList.contains("modo-voltar")) irParaTela(telaAnterior);
-    else abrirMenu();
+    if ($("#btn-menu").classList.contains("modo-voltar")) {
+      // "lista-detalhe" não é uma tela principal (irParaTela não sabe reabri-la com o título e os
+      // dados certos) — quando o item foi aberto de dentro de uma lista, volta pra essa lista.
+      const lista = telaAnterior === "lista-detalhe" ? listaAbertaAtual() : null;
+      if (lista) abrirListaDetalhe(lista);
+      else irParaTela(telaAnterior);
+    } else {
+      abrirMenu();
+    }
   };
   $("#overlay-menu").onclick = fecharMenu;
   $("#btn-topbar-inicio").onclick = () => irParaTela("inicio");
