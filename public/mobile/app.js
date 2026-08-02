@@ -849,6 +849,25 @@ async function salvarLista() {
   }
   $("#btn-salvar-lista").disabled = false;
 }
+// Desfaz os increments de "itens/grupos/locais mais usados" (estatisticas/geral) somados na
+// finalização — usado ao excluir ou reabrir uma lista já finalizada, senão o contador do
+// dashboard nunca desce mesmo depois da compra deixar de valer.
+async function desfazerEstatisticasFinalizacao(itensDaLista) {
+  const comprados = itensDaLista.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
+  if (comprados.length === 0) return;
+  const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
+  comprados.forEach((i) => {
+    contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) - 1;
+    const grupo = i.grupoNome || "Outros";
+    contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) - 1;
+    contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) - 1;
+  });
+  await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
+    itens: Object.fromEntries(Object.entries(contagemItens).map(([k, v]) => [k, increment(v)])),
+    grupos: Object.fromEntries(Object.entries(contagemGrupos).map(([k, v]) => [k, increment(v)])),
+    locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
+  }, { merge: true });
+}
 async function excluirListaAtual() {
   const id = $("#fn-id").value;
   if (!id) return;
@@ -860,11 +879,13 @@ async function excluirListaAtual() {
     : "Tem certeza que deseja excluir esta lista e todos os seus itens?";
   if (!confirm(mensagem)) return;
   const itensSnap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", id, "itensLista"));
+  const itensDaLista = itensSnap.docs.map((d) => d.data());
   await Promise.all(itensSnap.docs.map((d) => deleteDoc(d.ref)));
   await Promise.all(itensAtuais.map(async (item) => {
     const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), where("listaId", "==", id)));
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   }));
+  if (lista?.finalizadaEm) await desfazerEstatisticasFinalizacao(itensDaLista);
   await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", id));
   irParaTela("listas");
 }
@@ -1103,7 +1124,8 @@ function renderListaDetalhe() {
 }
 async function reabrirLista() {
   if (!listaAbertaId) return;
-  if (!confirm("Reabrir esta lista? Você poderá voltar a adicionar e excluir itens. O histórico de preços já registrado nesta compra não é desfeito.")) return;
+  if (!confirm("Reabrir esta lista? Você poderá voltar a adicionar e excluir itens. O histórico de preços já registrado nesta compra não é desfeito, mas as estatísticas de itens/grupos/locais mais usados dessa compra são desfeitas (voltam a contar quando a lista for finalizada de novo).")) return;
+  await desfazerEstatisticasFinalizacao(itensListaAtuais);
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
     finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
   });
