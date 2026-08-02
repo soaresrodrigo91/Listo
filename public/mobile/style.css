@@ -182,11 +182,10 @@ textarea {
 .field select {
   height: 48px;
 }
-/* appearance:none acima esconde a setinha nativa de incremento nos campos de quantidade
-   (type="number") — restaura só pra esses, pra poder subir/descer a quantidade pelo teclado. */
-.field input[type="number"] {
-  appearance: auto;
-}
+/* A setinha nativa do type="number" fica sob medida no desktop, mas em touch costuma repetir
+   incrementos sozinha com um único toque (bug conhecido do controle nativo em mobile) — por
+   isso appearance:none continua escondendo ela; o incremento/decremento vira os botões
+   .btn-stepper abaixo, que disparam um passo por toque, sem susto. */
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
@@ -201,6 +200,32 @@ textarea {
   background: var(--bg);
   color: var(--muted);
   cursor: default;
+}
+.stepper-quantidade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stepper-quantidade input {
+  flex: 1;
+  text-align: center;
+}
+.btn-stepper {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.btn-stepper:active {
+  background: var(--bg);
+  transform: scale(0.94);
 }
 .field input[type="date"] {
   font-size: 13px;
@@ -710,6 +735,20 @@ textarea {
   font-size: 14px;
   font-weight: 500;
   color: var(--muted);
+}
+.btn-editar-lista-mini {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--bg-soft);
+}
+.btn-editar-lista-mini:active {
+  transform: scale(0.92);
 }
 .btn-compartilhar-card {
   margin-left: auto;

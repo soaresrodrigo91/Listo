@@ -853,14 +853,18 @@ async function excluirListaAtual() {
   const id = $("#fn-id").value;
   if (!id) return;
   const lista = listasAtuais.find((l) => l.id === id);
-  // Concluída pode ser excluída também, mas avisa antes: só a lista some, o histórico de preços
-  // já registrado nos itens (usado nas comparações e no cadastro) continua intacto.
+  // Concluída pode ser excluída também, mas avisa antes: junto com a lista, some o histórico de
+  // preços que ELA gerou (a linha do valor de cadastro e o histórico de outras compras continuam).
   const mensagem = lista?.status === "comprada"
-    ? "Esta lista já está concluída. Tem certeza que deseja excluí-la? O histórico de preços dos itens não será apagado, apenas a lista de compras será excluída."
+    ? "Esta lista já está concluída. Tem certeza que deseja excluí-la? O histórico de preços registrado por essa compra também será apagado (o valor do cadastro e o histórico de outras compras continuam intactos)."
     : "Tem certeza que deseja excluir esta lista e todos os seus itens?";
   if (!confirm(mensagem)) return;
   const itensSnap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", id, "itensLista"));
   await Promise.all(itensSnap.docs.map((d) => deleteDoc(d.ref)));
+  await Promise.all(itensAtuais.map(async (item) => {
+    const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), where("listaId", "==", id)));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  }));
   await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", id));
   irParaTela("listas");
 }
@@ -1014,11 +1018,16 @@ function renderListaDetalhe() {
   const qtdPendentes = Math.max(itens.length - qtdComprados, 0);
   const valorTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   $("#lista-detalhe-cabecalho").innerHTML = `
-    <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
+    <div class="detalhe-titulo-credor">
+      <span class="detalhe-nome-lista">${esc(lista.nome)}</span>
+      <span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span>
+      <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    </div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
       <span>✅ ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
     </div>`;
+  $("#btn-abrir-editar-lista").onclick = () => abrirFormEditarLista(lista);
 
   itens = [...itens].sort((a, b) => {
     if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
@@ -1050,7 +1059,7 @@ function renderListaDetalhe() {
           <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/un.</span>
           <span class="valor">${formatarMoeda(i.subtotal)}</span>
         </div>
-        <button class="btn-excluir-linha" data-acao="excluir">✕</button>
+        ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
       </div>`;
       })
       .join("");
@@ -1090,6 +1099,15 @@ function renderListaDetalhe() {
   }
 
   $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
+  $("#btn-reabrir-lista").classList.toggle("hidden", !lista.finalizadaEm);
+}
+async function reabrirLista() {
+  if (!listaAbertaId) return;
+  if (!confirm("Reabrir esta lista? Você poderá voltar a adicionar e excluir itens. O histórico de preços já registrado nesta compra não é desfeito.")) return;
+  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
+    finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
+  });
+  exibirSucesso("Lista reaberta!");
 }
 
 // Preferência (Configurações) de qual valor usar como estimativa ao adicionar um item numa lista:
@@ -1276,7 +1294,9 @@ function abrirModalComprar(itemListaId) {
     $("#mc-quantidade").value = item.quantidade || "";
     recalcularValorComprarPorQuantidade();
   } else {
-    $("#mc-valor").value = "";
+    // Pré-preenche com o valor já provisionado pra esse item na lista — se bater com o que foi
+    // pago de verdade, só confirma; se não, edita normalmente antes de confirmar.
+    $("#mc-valor").value = item?.subtotal ? formatarMoeda(item.subtotal) : "";
   }
   // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
   // lembrando o último local escolhido (só falta informar o valor a cada item seguinte).
@@ -1567,7 +1587,10 @@ async function abrirItemDetalhe(item, origemTela) {
   // preços atualizado a cada compra, em vez de mostrar sempre o número fixo do cadastro.
   const origemValor = await valorProvisionadoComOrigem(item);
   const rotuloOrigemValor = OPCOES_VALOR_PROVISIONADO.find((o) => o.valor === origemValor.origem)?.rotulo || "";
-  const linhasValorConsiderado = [["Valor", `${formatarMoeda(origemValor.valor)} (${rotuloOrigemValor})`]];
+  const linhasValorConsiderado = [
+    ["Valor", formatarMoeda(origemValor.valor)],
+    ["Configuração para valor", rotuloOrigemValor],
+  ];
   if (origemValor.localId) {
     linhasValorConsiderado.push(["Comprado em", locaisAtuais.find((l) => l.id === origemValor.localId)?.nome || "—"]);
   }
@@ -1591,6 +1614,34 @@ async function abrirItemDetalhe(item, origemTela) {
   mostrarTelaCheia("item-detalhe", item.nome);
 }
 
+// Um item só tem "compra registrada de verdade" quando existe algum histórico que não seja a
+// linha-semente do cadastro (origemCadastro) — usado pra travar o campo "Valor" do formulário.
+async function itemTemCompraRegistrada(itemId) {
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", itemId, "historicoPrecos"));
+  return snap.docs.some((d) => !d.data().origemCadastro);
+}
+// Migração manual (Configurações): itens cadastrados antes da linha-semente do cadastro existir
+// não têm esse registro ainda — roda uma vez só pra criar o que estiver faltando.
+async function gerarHistoricoCadastroItensAntigos() {
+  if (!confirm("Isso vai conferir todos os itens cadastrados e criar a linha de \"Valor do cadastro\" no histórico de quem ainda não tiver. Pode levar alguns segundos. Continuar?")) return;
+  const btn = $("#btn-gerar-historico-cadastro");
+  btn.disabled = true;
+  let criados = 0;
+  try {
+    for (const item of itensAtuais) {
+      const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
+      if (snap.docs.some((d) => d.data().origemCadastro)) continue;
+      await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), {
+        localId: null, valor: item.valor || 0, data: "2000-01-01", listaId: null, origemCadastro: true,
+      });
+      criados++;
+    }
+    exibirSucesso(criados > 0 ? `Histórico de cadastro criado para ${criados} ${criados === 1 ? "item" : "itens"}.` : "Todos os itens já tinham o histórico de cadastro.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // Exibida na aba "Histórico de Preços" do item: reduzida a 1 linha por local (a mais
 // recente), mas o botão de excluir apaga TODOS os registros daquele item+local — senão o
 // registro mais antigo simplesmente reapareceria no lugar do que acabou de ser removido.
@@ -1609,7 +1660,7 @@ async function renderHistoricoItem(item) {
         <span class="local">${h.origemCadastro ? "Valor do cadastro" : esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span>
         <span class="valor">${formatarMoeda(h.valor)}</span>
         <span class="data">${h.origemCadastro ? "Cadastro" : formatarDataBR(h.data)}</span>
-        <button class="btn-excluir-historico" data-local-id="${h.localId}" aria-label="Excluir registro">🗑️</button>
+        ${h.origemCadastro ? "" : `<button class="btn-excluir-historico" data-local-id="${h.localId}" aria-label="Excluir registro">🗑️</button>`}
       </div>`).join("")
     : `<div class="vazio">Nenhuma compra registrada ainda para este item.</div>`;
 
@@ -1633,6 +1684,8 @@ function abrirFormNovoItem() {
   $("#fi-descricao").value = "";
   $("#fi-descricao-unidade").value = "";
   $("#fi-valor").value = "";
+  $("#fi-valor").disabled = false;
+  $("#fi-valor-aviso").classList.add("hidden");
   $("#fi-marca").value = "";
   $("#fi-grupo-nome").value = "";
   $("#fi-grupo-id").value = "";
@@ -1717,7 +1770,7 @@ function renderSugestoesItem(query) {
     };
   });
 }
-function abrirFormEditarItem(item) {
+async function abrirFormEditarItem(item) {
   telaAnterior = "cadastro-itens";
   $("#fi-id").value = item.id;
   $("#fi-nome").value = item.nome;
@@ -1734,6 +1787,12 @@ function abrirFormEditarItem(item) {
   $("#fi-unidade-sugestoes").classList.add("hidden");
   mostrarMsg("#msg-form-item", "", "");
   mostrarTelaCheia("form-item", "Editar item");
+  // Trava o campo "Valor" assim que existir compra registrada — ele vira dinâmico a partir daí
+  // (conforme a configuração e o histórico), só volta a ser editável se todo o histórico real
+  // desse item for excluído.
+  const travado = await itemTemCompraRegistrada(item.id);
+  $("#fi-valor").disabled = travado;
+  $("#fi-valor-aviso").classList.toggle("hidden", !travado);
 }
 async function salvarItem() {
   const id = $("#fi-id").value;
@@ -1769,8 +1828,24 @@ async function salvarItem() {
   try {
     if (id) {
       await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
+      // Enquanto não existir compra real, mantém a linha-semente do cadastro em dia com o valor
+      // editado — assim que a 1ª compra acontecer, o campo trava e essa linha para de mudar.
+      if (!(await itemTemCompraRegistrada(id))) {
+        const snapHist = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos"));
+        const semente = snapHist.docs.find((d) => d.data().origemCadastro);
+        if (semente) {
+          await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos", semente.id), { valor: dados.valor });
+        } else {
+          await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos"), {
+            localId: null, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
+          });
+        }
+      }
     } else {
-      await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
+      const refItem = await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
+      await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", refItem.id, "historicoPrecos"), {
+        localId: null, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
+      });
       notificarMembrosEspaco(`${nomeExibicaoUsuario()} cadastrou o item "${nome}".`);
     }
     exibirSucesso("Item salvo com sucesso!");
@@ -2634,6 +2709,7 @@ function ligarEventos() {
     fecharFormAdicionarItem();
   });
   $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
+  $("#btn-reabrir-lista").onclick = reabrirLista;
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
@@ -2710,6 +2786,7 @@ function ligarEventos() {
   });
   $("#btn-confirmar-enviar-lista").onclick = confirmarEnvioParaLista;
   $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
+  $("#btn-gerar-historico-cadastro").onclick = gerarHistoricoCadastroItensAntigos;
 
   const chaveTema = $("#chave-tema-escuro");
   const temaEscuroSalvo = document.documentElement.getAttribute("data-tema") === "escuro";
@@ -2726,6 +2803,20 @@ function ligarEventos() {
   ["#mc-valor", "#fi-valor"].forEach(ligarMascaraMoeda);
   ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
   ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
+  // Botões "−"/"+" dos campos de quantidade: um passo por toque (o spinner nativo do
+  // type="number" some incrementos repetidos sozinho em telas de toque).
+  document.querySelectorAll(".btn-stepper").forEach((btn) => {
+    btn.onclick = () => {
+      const input = $(`#${btn.dataset.alvo}`);
+      if (!input) return;
+      const passo = Number(input.step) || 1;
+      const minimo = input.min !== "" ? Number(input.min) : -Infinity;
+      let valor = Math.round(((Number(input.value) || 0) + passo * Number(btn.dataset.delta)) * 100) / 100;
+      if (valor < minimo) valor = minimo;
+      input.value = valor;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+  });
   renderOpcoesValorProvisionado();
 
   $("#btn-onboarding-proximo").onclick = () => {
