@@ -621,7 +621,11 @@ function preencherSelectFormaPagamento() {
 }
 // Nenhuma sugestão aparece até o usuário digitar — nada vem pré-selecionado, diferente de um
 // <select> nativo (que sempre mostra/seleciona a primeira opção por padrão).
-function renderSugestoesItemLista(query) {
+// Token evita que a resposta de uma busca antiga (mais lenta) sobrescreva uma mais nova —
+// a consulta do valor provisionado é assíncrona (histórico de preços), então pode chegar fora
+// de ordem se a pessoa digitar rápido.
+let tokenSugestoesItemLista = 0;
+async function renderSugestoesItemLista(query) {
   const container = $("#ld-item-sugestoes");
   const termo = query.trim().toLowerCase();
   const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => i.nome.toLowerCase().includes(termo)).slice(0, 6);
@@ -631,10 +635,15 @@ function renderSugestoesItemLista(query) {
     container.innerHTML = "";
     return;
   }
+  const meuToken = ++tokenSugestoesItemLista;
+  // Mesma regra de preferência (Configurações) usada ao adicionar o item de fato: valor do
+  // cadastro, último comprado ou mais barato — sem histórico ainda, cai no valor do cadastro.
+  const valores = await Promise.all(encontrados.map((i) => valorProvisionadoParaItem(i)));
+  if (meuToken !== tokenSugestoesItemLista) return;
   container.innerHTML = encontrados
-    .map((i) => {
+    .map((i, idx) => {
       const detalhe = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean).join(" · ");
-      return `<div class="autocomplete-item" data-id="${i.id}"><span>${esc(i.nome)}</span><span class="grupo">${esc(detalhe)}</span></div>`;
+      return `<div class="autocomplete-item" data-id="${i.id}"><span class="nome">${esc(i.nome)}</span><span class="grupo">${esc(detalhe)}</span><span class="valor">${formatarMoeda(valores[idx])}</span></div>`;
     })
     .join("");
   container.classList.remove("hidden");
@@ -1084,7 +1093,7 @@ function renderListaDetalhe() {
         const catalogo = itensAtuais.find((it) => it.id === i.itemId);
         const partes = [i.marca ?? catalogo?.marca, i.descricao ?? catalogo?.descricao, i.descricaoUnidade ?? catalogo?.descricaoUnidade].filter(Boolean);
         const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("")
-          + (espacoCompartilhado && i.adicionadoPorNome ? `<span>${partes.length ? "· " : ""}adicionado por ${esc(i.adicionadoPorNome)}</span>` : "");
+          + (espacoCompartilhado && i.adicionadoPorNome ? `<span>${partes.length ? "· " : ""}${esc(i.adicionadoPorNome)}</span>` : "");
         return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
         <button class="chk" data-acao="marcar">✓</button>
@@ -2718,6 +2727,7 @@ function ligarEventos() {
   });
   $("#ld-item-nome").addEventListener("blur", () => setTimeout(() => $("#ld-item-sugestoes").classList.add("hidden"), 150));
   $("#btn-adicionar-item-lista").onclick = adicionarItemNaLista;
+  $("#btn-cancelar-add-item-lista").onclick = fecharFormAdicionarItem;
   $("#btn-abrir-form-add-item").onclick = () => {
     $("#btn-abrir-form-add-item").classList.add("hidden");
     $("#form-adicionar-item").classList.remove("hidden");

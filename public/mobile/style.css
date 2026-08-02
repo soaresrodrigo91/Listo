@@ -1447,9 +1447,22 @@ main::-webkit-scrollbar {
 .autocomplete-item:active {
   background: var(--bg);
 }
+.autocomplete-item .nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .autocomplete-item .grupo {
   color: var(--muted);
   font-size: 11px;
+  flex-shrink: 0;
+}
+.autocomplete-item .valor {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
