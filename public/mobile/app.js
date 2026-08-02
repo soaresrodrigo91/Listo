@@ -2523,8 +2523,8 @@ function ligarEventos() {
   document.querySelectorAll(".fab-opcao").forEach((btn) => {
     btn.onclick = () => {
       fecharFabInicio();
-      if (btn.dataset.tipo === "lista") abrirFormNovaLista();
-      else abrirFormNovoItem();
+      if (btn.dataset.tipo === "lista") irParaTela("listas");
+      else irParaTela("cadastro-itens");
     };
   });
   $("#fab-listas").onclick = abrirFormNovaLista;
