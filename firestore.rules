@@ -45,6 +45,10 @@ service cloud.firestore {
     match /notificacoes/{notifId} {
       allow read: if request.auth != null && resource.data.uidDestino == request.auth.uid;
 
+      // Só o destinatário pode marcar como lida (sino), e só esse campo — nada mais muda.
+      allow update: if request.auth != null && resource.data.uidDestino == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lida"]);
+
       allow create: if request.auth != null && (
         // tipo "convite_recebido": o convidante notifica o convidado (paraUid do convite).
         (request.resource.data.tipo == "convite_recebido"

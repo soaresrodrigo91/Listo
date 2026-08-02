@@ -747,6 +747,17 @@ function renderCarrosselListas() {
       const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
       const comprados = l.qtdComprados || 0;
       const pendentes = Math.max((l.qtdItens || 0) - comprados, 0);
+      // Concluída: mostra provisionado x real e a diferença, pra saber na hora se a compra saiu
+      // mais cara ou mais barata do que o estimado — vermelho passou do previsto, verde economizou.
+      const diferenca = (l.valorTotalPago || 0) - (l.valorProvisionadoTotal || 0);
+      const corDiferenca = diferenca > 0 ? "var(--status-vermelho)" : diferenca < 0 ? "var(--status-verde)" : "var(--muted)";
+      const comparativo = status === "comprada" && l.valorTotalPago != null
+        ? `<div class="card-lista-comparativo">
+            <span>Provisionado: ${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
+            <span>Real: ${formatarMoeda(l.valorTotalPago || 0)}</span>
+            <span style="color:${corDiferenca}">Diferença: ${diferenca > 0 ? "+" : ""}${formatarMoeda(diferenca)}</span>
+          </div>`
+        : "";
       return `<div class="card-lista status-${status}" data-id="${l.id}">
         <div class="card-lista-topo">
           <div>
@@ -765,6 +776,7 @@ function renderCarrosselListas() {
           <span><span class="icone-pendente">×</span> ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
           <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
         </div>
+        ${comparativo}
       </div>`;
     })
     .join("");
@@ -1346,9 +1358,26 @@ async function confirmarFinalizar() {
   const forma = formasAtuais.find((f) => f.id === formaId);
   const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
   const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
-  await Promise.all(comprados.map((i) => addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
-    localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
-  })));
+  // Se esta é a primeira compra já registrada do item, preserva o valor do cadastro como um
+  // registro a mais no histórico (com data bem antiga, pra nunca ser confundido com "o último
+  // comprado") — assim ele continua entrando nas comparações de "mais barato" mesmo depois que
+  // o histórico real começar a se acumular, em vez de sumir de vista depois da 1ª compra.
+  const historicosVazios = await Promise.all(comprados.map(async (i) => {
+    const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"));
+    return snap.empty;
+  }));
+  await Promise.all(comprados.flatMap((i, idx) => {
+    const gravacoes = [addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
+      localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
+    })];
+    if (historicosVazios[idx]) {
+      const valorCadastro = itensAtuais.find((it) => it.id === i.itemId)?.valor || 0;
+      gravacoes.push(addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
+        localId: null, valor: valorCadastro, data: "2000-01-01", listaId: null, origemCadastro: true,
+      }));
+    }
+    return gravacoes;
+  }));
   // Estatísticas dos dashboards (itens/grupos/locais mais usados) contam só o que foi de fato
   // finalizado — soma as ocorrências por chave e grava um único increment por chave.
   if (comprados.length > 0) {
@@ -1425,12 +1454,21 @@ async function renderCadastroItens() {
 // Picker de "enviar item direto para uma lista pendente" a partir do catálogo (tela Itens) —
 // sempre pergunta qual lista quando há mais de uma pendente, nunca escolhe uma automaticamente.
 // Listas que já têm esse item ficam desabilitadas (não permite duplicar o item na mesma lista).
+// A pessoa escolhe clicando (só destaca, não envia na hora) e confirma no botão "Confirmar".
+let itemParaEnviarAtual = null;
+let listaEnviarSelecionadaId = null;
 async function abrirPickerEnviarLista(item) {
   if (!item) return;
+  itemParaEnviarAtual = item;
+  listaEnviarSelecionadaId = null;
   $("#titulo-enviar-lista").textContent = `Enviar "${item.nome}" para qual lista?`;
   $("#env-quantidade").value = "1";
   configurarCampoQuantidade($("#env-quantidade"), item.unidade);
-  const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
+  $("#btn-confirmar-enviar-lista").classList.add("hidden");
+  // Mais recente primeiro na ordem de exibição não importa aqui — só precisamos saber qual é a
+  // última criada, pra vir pré-selecionada quando houver mais de uma disponível.
+  const pendentes = [...listasAtuais.filter((l) => l.status !== "comprada" || l.permanente)]
+    .sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   const container = $("#lista-opcoes-enviar");
   mostrarMsg("#msg-enviar-lista", "", "");
   if (pendentes.length === 0) {
@@ -1444,21 +1482,36 @@ async function abrirPickerEnviarLista(item) {
     const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "listas", l.id, "itensLista"), where("itemId", "==", item.id)));
     return !snap.empty;
   }));
+  const disponiveis = pendentes.filter((l, idx) => !jaNaLista[idx]);
+  listaEnviarSelecionadaId = disponiveis.length ? disponiveis[disponiveis.length - 1].id : null;
+  renderOpcoesListaEnviar(pendentes, jaNaLista);
+}
+function renderOpcoesListaEnviar(pendentes, jaNaLista) {
+  const container = $("#lista-opcoes-enviar");
   container.innerHTML = pendentes
     .map((l, idx) => jaNaLista[idx]
-      ? `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" disabled style="width:100%;margin-bottom:8px;text-align:left;opacity:.5;cursor:not-allowed">${esc(item.nome)} já está na lista "${esc(l.nome)}"</button>`
-      : `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}</button>`)
+      ? `<button type="button" class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" disabled style="width:100%;margin-bottom:8px;text-align:left;opacity:.5;cursor:not-allowed">${esc(itemParaEnviarAtual?.nome)} já está na lista "${esc(l.nome)}"</button>`
+      : `<button type="button" class="btn-secundario opcao-lista-enviar ${l.id === listaEnviarSelecionadaId ? "selecionada" : ""}" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}</button>`)
     .join("");
   container.querySelectorAll(".opcao-lista-enviar:not([disabled])").forEach((btn) => {
-    btn.onclick = () => enviarItemParaLista(item, btn.dataset.listaId);
+    btn.onclick = () => {
+      listaEnviarSelecionadaId = btn.dataset.listaId;
+      renderOpcoesListaEnviar(pendentes, jaNaLista);
+    };
   });
+  $("#btn-confirmar-enviar-lista").classList.toggle("hidden", !listaEnviarSelecionadaId);
 }
 function fecharPickerEnviarLista() {
   $("#overlay-enviar-lista").classList.add("hidden");
   mostrarMsg("#msg-enviar-lista", "", "");
+  itemParaEnviarAtual = null;
+  listaEnviarSelecionadaId = null;
 }
-async function enviarItemParaLista(item, listaId) {
-  // Checagem de segurança contra corrida (ex: enviado por outro dispositivo entre abrir o picker e clicar).
+async function confirmarEnvioParaLista() {
+  if (!itemParaEnviarAtual || !listaEnviarSelecionadaId) return;
+  const item = itemParaEnviarAtual;
+  const listaId = listaEnviarSelecionadaId;
+  // Checagem de segurança contra corrida (ex: enviado por outro dispositivo entre abrir o picker e confirmar).
   const jaExiste = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), where("itemId", "==", item.id)));
   if (!jaExiste.empty) {
     const nomeLista = listasAtuais.find((l) => l.id === listaId)?.nome || "";
@@ -1510,9 +1563,11 @@ async function abrirItemDetalhe(item, origemTela) {
   telaAnterior = origemTela || "cadastro-itens";
   $(".tab[data-tab='cadastro']").click();
 
+  // "Valor" já sai dinâmico direto — conforme a preferência (Configurações) e o histórico de
+  // preços atualizado a cada compra, em vez de mostrar sempre o número fixo do cadastro.
   const origemValor = await valorProvisionadoComOrigem(item);
   const rotuloOrigemValor = OPCOES_VALOR_PROVISIONADO.find((o) => o.valor === origemValor.origem)?.rotulo || "";
-  const linhasValorConsiderado = [["Valor considerado", `${formatarMoeda(origemValor.valor)} (${rotuloOrigemValor})`]];
+  const linhasValorConsiderado = [["Valor", `${formatarMoeda(origemValor.valor)} (${rotuloOrigemValor})`]];
   if (origemValor.localId) {
     linhasValorConsiderado.push(["Comprado em", locaisAtuais.find((l) => l.id === origemValor.localId)?.nome || "—"]);
   }
@@ -1523,7 +1578,6 @@ async function abrirItemDetalhe(item, origemTela) {
       ["Marca", item.marca || "—"],
       ["Descrição", item.descricao || "—"],
       ["Descrição da unidade", item.descricaoUnidade || "—"],
-      ["Valor", item.valor ? formatarMoeda(item.valor) : "—"],
       ...linhasValorConsiderado,
       ["Grupo", item.grupoNome || "—"],
       ["Unidade", item.unidade],
@@ -1552,9 +1606,9 @@ async function renderHistoricoItem(item) {
   $("#hist-media").textContent = valores.length ? formatarMoeda(valores.reduce((s, v) => s + v, 0) / valores.length) : "—";
   $("#tabela-historico").innerHTML = ultimos.length
     ? ultimos.map((h) => `<div class="linha-historico">
-        <span class="local">${esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span>
+        <span class="local">${h.origemCadastro ? "Valor do cadastro" : esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span>
         <span class="valor">${formatarMoeda(h.valor)}</span>
-        <span class="data">${formatarDataBR(h.data)}</span>
+        <span class="data">${h.origemCadastro ? "Cadastro" : formatarDataBR(h.data)}</span>
         <button class="btn-excluir-historico" data-local-id="${h.localId}" aria-label="Excluir registro">🗑️</button>
       </div>`).join("")
     : `<div class="vazio">Nenhuma compra registrada ainda para este item.</div>`;
@@ -2241,7 +2295,12 @@ async function marcarNotificacoesComoLidas() {
   if (naoLidas.length === 0) return;
   const batch = writeBatch(bd);
   naoLidas.forEach((n) => batch.update(doc(bd, "notificacoes", n.id), { lida: true }));
-  await batch.commit();
+  try {
+    await batch.commit();
+  } catch {
+    // Regra do Firestore ainda não liberou update em notificacoes (ex.: regra desatualizada no
+    // console) — falha aqui não deve travar a tela, só o badge não vai zerar até resolver.
+  }
 }
 async function limparTodasNotificacoes() {
   const batch = writeBatch(bd);
@@ -2649,6 +2708,7 @@ function ligarEventos() {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", itemCatalogoAbertoId), { fotoUrl: null });
     renderImagemItemDetalhe(null);
   });
+  $("#btn-confirmar-enviar-lista").onclick = confirmarEnvioParaLista;
   $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
 
   const chaveTema = $("#chave-tema-escuro");

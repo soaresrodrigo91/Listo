@@ -182,6 +182,11 @@ textarea {
 .field select {
   height: 48px;
 }
+/* appearance:none acima esconde a setinha nativa de incremento nos campos de quantidade
+   (type="number") — restaura só pra esses, pra poder subir/descer a quantidade pelo teclado. */
+.field input[type="number"] {
+  appearance: auto;
+}
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
@@ -664,6 +669,12 @@ textarea {
   color: #fff;
   border-color: var(--primary);
 }
+.opcao-lista-enviar.selecionada {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+  font-weight: 700;
+}
 
 /* ---------- tela de detalhes / linhas ---------- */
 .detalhe-lista {
@@ -1138,6 +1149,16 @@ main::-webkit-scrollbar {
   display: flex;
   gap: 12px;
   margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.card-lista-comparativo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
   font-size: 11px;
   color: var(--muted);
 }
