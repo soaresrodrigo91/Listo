@@ -839,7 +839,14 @@ async function salvarLista() {
 }
 async function excluirListaAtual() {
   const id = $("#fn-id").value;
-  if (!id || !confirm("Excluir esta lista e todos os seus itens?")) return;
+  if (!id) return;
+  const lista = listasAtuais.find((l) => l.id === id);
+  // Concluída pode ser excluída também, mas avisa antes: só a lista some, o histórico de preços
+  // já registrado nos itens (usado nas comparações e no cadastro) continua intacto.
+  const mensagem = lista?.status === "comprada"
+    ? "Esta lista já está concluída. Tem certeza que deseja excluí-la? O histórico de preços dos itens não será apagado, apenas a lista de compras será excluída."
+    : "Tem certeza que deseja excluir esta lista e todos os seus itens?";
+  if (!confirm(mensagem)) return;
   const itensSnap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", id, "itensLista"));
   await Promise.all(itensSnap.docs.map((d) => deleteDoc(d.ref)));
   await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", id));
@@ -2183,17 +2190,17 @@ function assinarNotificacoes() {
 }
 function renderNotificacoes() {
   const badge = $("#badge-sino");
-  const total = notificacoesAtuais.length;
-  badge.textContent = total > 9 ? "9+" : String(total);
-  badge.classList.toggle("hidden", total === 0);
+  const naoLidas = notificacoesAtuais.filter((n) => !n.lida).length;
+  badge.textContent = naoLidas > 9 ? "9+" : String(naoLidas);
+  badge.classList.toggle("hidden", naoLidas === 0);
 
   const container = $("#lista-notificacoes");
-  if (total === 0) {
+  if (notificacoesAtuais.length === 0) {
     container.innerHTML = `<div class="notif-vazio">Nenhuma notificação.</div>`;
     return;
   }
   container.innerHTML = notificacoesAtuais
-    .map((n) => `<div class="notif-item nao-lida" data-id="${n.id}">
+    .map((n) => `<div class="notif-item ${n.lida ? "" : "nao-lida"}" data-id="${n.id}">
       <div class="notif-corpo">
         <div class="notif-msg">${esc(n.mensagem)}</div>
         <div class="notif-quando">${formatarQuandoNotificacao(n.criadoEm)}</div>
@@ -2223,6 +2230,16 @@ function renderNotificacoes() {
 function abrirNotificacoes() {
   telaAnterior = TELAS_PRINCIPAIS.find((t) => !$(`#tela-${t}`).classList.contains("hidden")) || "inicio";
   mostrarTelaCheia("notificacoes", "Notificações");
+  marcarNotificacoesComoLidas();
+}
+// Some com o sinal vermelho do sino assim que a pessoa abre a tela — as notificações continuam
+// na lista (só desaparecem se excluídas), mas deixam de contar no badge.
+async function marcarNotificacoesComoLidas() {
+  const naoLidas = notificacoesAtuais.filter((n) => !n.lida);
+  if (naoLidas.length === 0) return;
+  const batch = writeBatch(bd);
+  naoLidas.forEach((n) => batch.update(doc(bd, "notificacoes", n.id), { lida: true }));
+  await batch.commit();
 }
 async function limparTodasNotificacoes() {
   const batch = writeBatch(bd);
@@ -2257,7 +2274,16 @@ async function convidarParaEspaco() {
         criadoEm: serverTimestamp(), lida: false,
       });
     }
-    mostrarMsg("#msg-compartilhadas", `Convite enviado para ${paraEmail}.`, "ok");
+    // Sem conta encontrada pra esse e-mail: o convite ainda é criado (a pessoa pode aceitar
+    // assim que se cadastrar), mas avisa aqui — é o único jeito de pegar um e-mail digitado
+    // errado na hora, em vez de só falhar silenciosamente quando alguém tentar aceitar.
+    mostrarMsg(
+      "#msg-compartilhadas",
+      paraUid
+        ? `Convite enviado para ${paraEmail}.`
+        : `Convite enviado para ${paraEmail}, mas ainda não encontramos uma conta com esse e-mail no Listô — confira se digitou certinho. Se a pessoa ainda não tem conta, ela poderá aceitar assim que se cadastrar.`,
+      "ok"
+    );
     $("#comp-email").value = "";
     exibirSucesso("Convite enviado!");
   } catch {
@@ -2279,8 +2305,16 @@ async function aceitarConvite(convite) {
     mensagem: `${nomeAceitante} aceitou seu convite — agora vocês compartilham as mesmas listas, itens, grupos e locais.`,
     criadoEm: serverTimestamp(), lida: false,
   });
-  await batch.commit();
-  exibirSucesso("Convite aceito! Agora vocês compartilham o mesmo espaço.");
+  try {
+    await batch.commit();
+    exibirSucesso("Convite aceito! Agora vocês compartilham o mesmo espaço.");
+  } catch {
+    // A gravação é tudo-ou-nada (mesmo batch): se as regras do Firestore recusarem a troca de
+    // espaço (ex.: e-mail do convite não bate certinho com o e-mail desta conta), nada é
+    // aplicado — nem o status do convite muda. Sem isso, falhava calado e a pessoa achava que
+    // tinha aceitado, mas continuava no próprio espaço.
+    exibirSucesso("Não foi possível aceitar o convite. Confira se o e-mail usado no convite é exatamente o mesmo desta conta.", 4000);
+  }
 }
 async function recusarConvite(convite) {
   if (!convite) return;
