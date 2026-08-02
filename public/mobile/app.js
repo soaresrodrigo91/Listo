@@ -105,6 +105,7 @@ let notificacoesAtuais = [];
 let listaAbertaId = null;
 let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
+let ultimoLocalUsadoId = null;
 let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroLocalLista = null, filtroGrupoItens = null;
 
@@ -397,6 +398,9 @@ function reconectarEspaco(espacoId) {
     listasAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderCarrosselListas();
     renderDashboard();
+    // Mantém o cabeçalho (total, status) da lista aberta em dia quando o próprio doc da lista muda
+    // (ex: recalcularTotaisLista após alterar quantidade), sem depender de reabrir a tela.
+    if (listaAbertaId) renderListaDetalhe();
   });
 }
 
@@ -517,7 +521,10 @@ function renderSugestoesItemLista(query) {
     return;
   }
   container.innerHTML = encontrados
-    .map((i) => `<div class="autocomplete-item" data-id="${i.id}"><span>${esc(i.nome)}</span><span class="grupo">${esc(i.grupoNome || "")}</span></div>`)
+    .map((i) => {
+      const detalhe = [i.descricao, i.descricaoUnidade].filter(Boolean).join(" · ");
+      return `<div class="autocomplete-item" data-id="${i.id}"><span>${esc(i.nome)}</span><span class="grupo">${esc(detalhe)}</span></div>`;
+    })
     .join("");
   container.classList.remove("hidden");
   container.querySelectorAll(".autocomplete-item").forEach((el) => {
@@ -627,6 +634,8 @@ function renderCarrosselListas() {
     .map((l) => {
       const status = l.status || "pendente";
       const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
+      const comprados = l.qtdComprados || 0;
+      const pendentes = Math.max((l.qtdItens || 0) - comprados, 0);
       return `<div class="card-lista status-${status}" data-id="${l.id}">
         <div class="card-lista-topo">
           <div>
@@ -637,8 +646,12 @@ function renderCarrosselListas() {
           <span class="badge-status ${status}">${l.permanente ? "Permanente" : rotuloStatus}</span>
         </div>
         <div class="card-lista-rodape">
-          <span>${l.qtdComprados || 0}/${l.qtdItens || 0} itens</span>
+          <span>${comprados}/${l.qtdItens || 0} itens</span>
           <span class="valor">${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
+        </div>
+        <div class="card-lista-resumo-itens">
+          <span>✅ ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
+          <span>🔲 ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
         </div>
       </div>`;
     })
@@ -724,17 +737,15 @@ function abrirListaDetalhe(lista) {
   listaAbertaId = lista.id;
   filtroGrupoLista = null;
   filtroLocalLista = null;
+  ultimoLocalUsadoId = null;
   telaAnterior = "listas";
   if (unsubItensLista) unsubItensLista();
   unsubItensLista = onSnapshot(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"), (snap) => {
     itensListaAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderListaDetalhe();
   });
-  mostrarTelaCheia("lista-detalhe", lista.nome);
-  $("#ld-item-nome").value = "";
-  $("#ld-item-id").value = "";
-  $("#ld-item-sugestoes").classList.add("hidden");
-  $("#ld-unidade").value = "";
+  mostrarTelaCheia("lista-detalhe", "Lista de Compras");
+  fecharFormAdicionarItem();
 }
 
 function listaAbertaAtual() {
@@ -771,7 +782,7 @@ function renderListaDetalhe() {
   const status = lista.status || "pendente";
   const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
   $("#lista-detalhe-cabecalho").innerHTML = `
-    <div class="detalhe-titulo-credor">${esc(lista.nome)} <span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
+    <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
       <span>${lista.qtdComprados || 0}/${lista.qtdItens || 0} itens</span>
       <span class="valor">${formatarMoeda(lista.valorProvisionadoTotal || 0)}</span>
@@ -803,9 +814,12 @@ function renderListaDetalhe() {
         <button class="chk" data-acao="marcar">✓</button>
         <div class="info">
           <div class="nome">${esc(i.nome)}</div>
-          <div class="detalhe"><span>${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""}</span>${i.grupoNome ? `<span>· ${esc(i.grupoNome)}</span>` : ""}${i.comprado ? `<span>· ${esc(locaisAtuais.find((l) => l.id === i.localCompraId)?.nome || "")}</span>` : ""}${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
+          <div class="detalhe"><button class="btn-qtd" data-acao="qtd">${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""} ✎</button>${i.comprado ? `<span>· ${esc(locaisAtuais.find((l) => l.id === i.localCompraId)?.nome || "")}</span>` : ""}${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
         </div>
-        <div class="valor">${formatarMoeda(i.subtotal)}</div>
+        <div class="valor-linha">
+          <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/un.</span>
+          <span class="valor">${formatarMoeda(i.subtotal)}</span>
+        </div>
         <button class="btn-excluir-linha" data-acao="excluir">✕</button>
       </div>`)
       .join("");
@@ -825,6 +839,19 @@ function renderListaDetalhe() {
         recalcularTotaisLista();
       };
     });
+    container.querySelectorAll('[data-acao="qtd"]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        abrirModalQuantidade(btn.closest(".item").dataset.id);
+      };
+    });
+    container.querySelectorAll(".item").forEach((el) => {
+      el.onclick = () => {
+        const itemLista = itensListaAtuais.find((i) => i.id === el.dataset.id);
+        const itemCatalogo = itensAtuais.find((i) => i.id === itemLista?.itemId);
+        if (itemCatalogo) abrirItemDetalhe(itemCatalogo, "listas");
+      };
+    });
   }
 
   $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
@@ -837,6 +864,16 @@ async function ultimoValorConhecido(itemId) {
   if (snap.empty) return 0;
   const maisRecente = snap.docs.map((d) => d.data()).sort((a, b) => b.data.localeCompare(a.data))[0];
   return maisRecente.valor || 0;
+}
+
+function fecharFormAdicionarItem() {
+  $("#ld-item-nome").value = "";
+  $("#ld-item-id").value = "";
+  $("#ld-unidade").value = "";
+  $("#ld-quantidade").value = "1";
+  $("#ld-item-sugestoes").classList.add("hidden");
+  $("#form-adicionar-item").classList.add("hidden");
+  $("#btn-abrir-form-add-item").classList.remove("hidden");
 }
 
 async function adicionarItemNaLista() {
@@ -858,10 +895,7 @@ async function adicionarItemNaLista() {
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
   recalcularTotaisLista();
-  $("#ld-item-nome").value = "";
-  $("#ld-item-id").value = "";
-  $("#ld-unidade").value = "";
-  $("#ld-quantidade").value = "1";
+  fecharFormAdicionarItem();
   exibirSucesso("Item adicionado à lista!");
 }
 
@@ -878,10 +912,41 @@ async function recalcularTotaisLista(listaId = listaAbertaId) {
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaId), { qtdItens, qtdComprados, valorProvisionadoTotal, status });
 }
 
+/* ---------- alterar quantidade de um item na lista ---------- */
+function abrirModalQuantidade(itemListaId) {
+  const item = itensListaAtuais.find((i) => i.id === itemListaId);
+  if (!item) return;
+  itemListaPendenteId = itemListaId;
+  $("#qtd-valor").value = item.quantidade;
+  mostrarMsg("#msg-quantidade", "", "");
+  $("#overlay-quantidade").classList.remove("hidden");
+}
+function fecharModalQuantidade() {
+  $("#overlay-quantidade").classList.add("hidden");
+  itemListaPendenteId = null;
+}
+async function confirmarQuantidade() {
+  const quantidade = Number($("#qtd-valor").value);
+  if (!quantidade || quantidade <= 0) {
+    mostrarMsg("#msg-quantidade", "Informe uma quantidade válida.", "erro");
+    return;
+  }
+  const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
+  if (!item) return;
+  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
+    quantidade, subtotal: quantidade * (item.valorProvisionado || 0),
+  });
+  await recalcularTotaisLista();
+  fecharModalQuantidade();
+  exibirSucesso("Quantidade atualizada!");
+}
+
 /* ---------- marcar item como comprado (modal local + valor) ---------- */
 function abrirModalComprar(itemListaId) {
   itemListaPendenteId = itemListaId;
   $("#mc-valor").value = "";
+  // Lembra o último local usado nesta sessão de compras: assim só falta informar o valor a cada item.
+  if (ultimoLocalUsadoId) $("#mc-local").value = ultimoLocalUsadoId;
   mostrarMsg("#msg-comprar", "", "");
   $("#overlay-comprar").classList.remove("hidden");
 }
@@ -898,6 +963,7 @@ async function confirmarCompra() {
   }
   const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
   if (!item) return;
+  ultimoLocalUsadoId = localId;
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     comprado: true, localCompraId: localId, valorPago, compradoPor: usuario.uid, compradoEm: hojeISO(),
   });
@@ -945,6 +1011,7 @@ async function confirmarFinalizar() {
     mostrarMsg("#msg-finalizar", "Selecione a forma de pagamento e informe o valor total pago.", "erro");
     return;
   }
+  if (!confirm("Deseja realmente finalizar esta compra?")) return;
   const forma = formasAtuais.find((f) => f.id === formaId);
   const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
   // Grava o histórico de preços agora (não no check individual): só os itens efetivamente
@@ -979,13 +1046,17 @@ function renderCadastroItens() {
     return;
   }
   container.innerHTML = lista
-    .map((i) => `<div class="item" data-id="${i.id}">
+    .map((i) => {
+      const partes = [i.marca, i.descricaoUnidade, i.grupoNome || "Sem grupo"].filter(Boolean);
+      const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("");
+      return `<div class="item" data-id="${i.id}">
       <div class="info">
         <div class="nome">${esc(i.nome)}</div>
-        <div class="detalhe"><span>${esc(i.grupoNome || "Sem grupo")}</span><span>· ${esc(i.unidade)}</span>${i.descricaoUnidade ? `<span>· ${esc(i.descricaoUnidade)}</span>` : ""}${i.marca ? `<span>· ${esc(i.marca)}</span>` : ""}</div>
+        <div class="detalhe">${detalhe}</div>
       </div>
       <button class="btn-enviar-lista" data-id-enviar="${i.id}" aria-label="Enviar para lista pendente" title="Enviar para lista pendente">🛒</button>
-    </div>`)
+    </div>`;
+    })
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirItemDetalhe(itensAtuais.find((i) => i.id === el.dataset.id));
@@ -1000,26 +1071,45 @@ function renderCadastroItens() {
 
 // Picker de "enviar item direto para uma lista pendente" a partir do catálogo (tela Itens) —
 // sempre pergunta qual lista quando há mais de uma pendente, nunca escolhe uma automaticamente.
-function abrirPickerEnviarLista(item) {
+// Listas que já têm esse item ficam desabilitadas (não permite duplicar o item na mesma lista).
+async function abrirPickerEnviarLista(item) {
   if (!item) return;
+  $("#titulo-enviar-lista").textContent = `Enviar "${item.nome}" para qual lista?`;
   const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
   const container = $("#lista-opcoes-enviar");
+  mostrarMsg("#msg-enviar-lista", "", "");
   if (pendentes.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista pendente. Crie uma lista primeiro.</div>`;
-  } else {
-    container.innerHTML = pendentes
-      .map((l) => `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}</button>`)
-      .join("");
-    container.querySelectorAll(".opcao-lista-enviar").forEach((btn) => {
-      btn.onclick = () => enviarItemParaLista(item, btn.dataset.listaId);
-    });
+    $("#overlay-enviar-lista").classList.remove("hidden");
+    return;
   }
+  container.innerHTML = `<div class="vazio">Verificando listas...</div>`;
   $("#overlay-enviar-lista").classList.remove("hidden");
+  const jaNaLista = await Promise.all(pendentes.map(async (l) => {
+    const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "listas", l.id, "itensLista"), where("itemId", "==", item.id)));
+    return !snap.empty;
+  }));
+  container.innerHTML = pendentes
+    .map((l, idx) => jaNaLista[idx]
+      ? `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" disabled style="width:100%;margin-bottom:8px;text-align:left;opacity:.5;cursor:not-allowed">${esc(item.nome)} já está na lista "${esc(l.nome)}"</button>`
+      : `<button class="btn-secundario opcao-lista-enviar" data-lista-id="${l.id}" style="width:100%;margin-bottom:8px;text-align:left">${esc(l.nome)}</button>`)
+    .join("");
+  container.querySelectorAll(".opcao-lista-enviar:not([disabled])").forEach((btn) => {
+    btn.onclick = () => enviarItemParaLista(item, btn.dataset.listaId);
+  });
 }
 function fecharPickerEnviarLista() {
   $("#overlay-enviar-lista").classList.add("hidden");
+  mostrarMsg("#msg-enviar-lista", "", "");
 }
 async function enviarItemParaLista(item, listaId) {
+  // Checagem de segurança contra corrida (ex: enviado por outro dispositivo entre abrir o picker e clicar).
+  const jaExiste = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), where("itemId", "==", item.id)));
+  if (!jaExiste.empty) {
+    const nomeLista = listasAtuais.find((l) => l.id === listaId)?.nome || "";
+    mostrarMsg("#msg-enviar-lista", `${item.nome} já está na lista "${nomeLista}".`, "erro");
+    return;
+  }
   const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
   const valorProvisionado = await ultimoValorConhecido(item.id);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
@@ -1052,9 +1142,9 @@ async function salvarFotoItemDetalhe(arquivo, labelId) {
   label.textContent = textoOriginal;
 }
 
-async function abrirItemDetalhe(item) {
+async function abrirItemDetalhe(item, origemTela) {
   itemCatalogoAbertoId = item.id;
-  telaAnterior = "cadastro-itens";
+  telaAnterior = origemTela || "cadastro-itens";
   $(".tab[data-tab='cadastro']").click();
   $("#item-detalhe-info").innerHTML =
     [
@@ -1940,12 +2030,28 @@ function ligarEventos() {
   });
   $("#ld-item-nome").addEventListener("blur", () => setTimeout(() => $("#ld-item-sugestoes").classList.add("hidden"), 150));
   $("#btn-adicionar-item-lista").onclick = adicionarItemNaLista;
+  $("#btn-abrir-form-add-item").onclick = () => {
+    $("#btn-abrir-form-add-item").classList.add("hidden");
+    $("#form-adicionar-item").classList.remove("hidden");
+    $("#ld-item-nome").focus();
+  };
+  // Clicar fora do formulário de adicionar item (com ele aberto) equivale a desistir: recolhe de volta pra linha.
+  document.addEventListener("click", (e) => {
+    const form = $("#form-adicionar-item");
+    if (form.classList.contains("hidden")) return;
+    if (form.contains(e.target) || e.target.closest("#btn-abrir-form-add-item")) return;
+    fecharFormAdicionarItem();
+  });
   $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
   $("#btn-compartilhar-lista").onclick = compartilharListaWhatsApp;
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
   $("#overlay-comprar").addEventListener("click", (e) => { if (e.target.id === "overlay-comprar") fecharModalComprar(); });
+
+  $("#btn-confirmar-quantidade").onclick = confirmarQuantidade;
+  $("#btn-cancelar-quantidade").onclick = fecharModalQuantidade;
+  $("#overlay-quantidade").addEventListener("click", (e) => { if (e.target.id === "overlay-quantidade") fecharModalQuantidade(); });
 
   $("#btn-confirmar-finalizar").onclick = confirmarFinalizar;
   $("#btn-cancelar-finalizar").onclick = fecharModalFinalizar;
