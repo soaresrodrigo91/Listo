@@ -168,16 +168,20 @@ const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center P�
   .map((nome) => ({ nome, endereco: null, cidade: null }));
 const FORMAS_PADRAO = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Flash"]
   .map((nome) => ({ nome }));
-const UNIDADES_PADRAO = [
-  { nome: "Bandeja", fracionavel: false }, { nome: "Caixa", fracionavel: false }, { nome: "Dúzia", fracionavel: false },
-  { nome: "Fardo", fracionavel: false }, { nome: "Frasco", fracionavel: false }, { nome: "Garrafa", fracionavel: false },
-  { nome: "Gramas", fracionavel: true }, { nome: "Kg", fracionavel: true }, { nome: "Lata", fracionavel: false },
-  { nome: "ml", fracionavel: true }, { nome: "Rolo", fracionavel: false }, { nome: "Saco", fracionavel: false },
-  { nome: "Unidade", fracionavel: false },
-];
 // Abrevia as unidades padrão com forma curta conhecida (usado no "R$/un." da lista de compras);
-// unidade fora dessa lista (inclusive as que a pessoa cadastrar) usa o próprio nome, minúsculo.
-const ABREVIACOES_UNIDADE = { kg: "kg", gramas: "g", ml: "ml", unidade: "un." };
+// unidade fora dessa lista (inclusive as que a pessoa cadastrar) usa o próprio nome, minúsculo —
+// as demais do seed (Bandeja, Fardo, Frasco, Garrafa, Lata, Rolo, Saco) não têm abreviação
+// consagrada em português, então ficam por extenso mesmo.
+const ABREVIACOES_UNIDADE = { kg: "kg", gramas: "g", ml: "ml", unidade: "un.", caixa: "cx", dúzia: "dz" };
+const UNIDADES_PADRAO = [
+  { nome: "Bandeja", fracionavel: false, abreviacao: null }, { nome: "Caixa", fracionavel: false, abreviacao: "cx" },
+  { nome: "Dúzia", fracionavel: false, abreviacao: "dz" }, { nome: "Fardo", fracionavel: false, abreviacao: null },
+  { nome: "Frasco", fracionavel: false, abreviacao: null }, { nome: "Garrafa", fracionavel: false, abreviacao: null },
+  { nome: "Gramas", fracionavel: true, abreviacao: "g" }, { nome: "Kg", fracionavel: true, abreviacao: "kg" },
+  { nome: "Lata", fracionavel: false, abreviacao: null }, { nome: "ml", fracionavel: true, abreviacao: "ml" },
+  { nome: "Rolo", fracionavel: false, abreviacao: null }, { nome: "Saco", fracionavel: false, abreviacao: null },
+  { nome: "Unidade", fracionavel: false, abreviacao: "un." },
+];
 function abreviarUnidade(nomeUnidade) {
   // Prioriza a abreviação salva no cadastro da própria unidade; sem uma, cai na tabela padrão
   // (unidades do seed); sem estar nem lá, usa o nome como está, em minúsculo.
@@ -185,6 +189,19 @@ function abreviarUnidade(nomeUnidade) {
   if (unidade?.abreviacao) return unidade.abreviacao;
   const chave = (nomeUnidade || "").trim().toLowerCase();
   return ABREVIACOES_UNIDADE[chave] || chave || "un";
+}
+// Preenche em segundo plano a abreviação das unidades padrão criadas antes desse campo existir
+// (silencioso, sem botão) — unidade nova que a pessoa cadastrar continua exigindo que ela mesma
+// informe a abreviação, já que não tem como adivinhar uma unidade inventada.
+let abreviacoesPadraoAplicadas = false;
+async function aplicarAbreviacoesPadraoUnidades() {
+  if (abreviacoesPadraoAplicadas) return;
+  abreviacoesPadraoAplicadas = true;
+  const pendentes = unidadesAtuais.filter((u) => !u.abreviacao && ABREVIACOES_UNIDADE[u.nome.trim().toLowerCase()]);
+  await Promise.all(pendentes.map((u) => updateDoc(
+    doc(bd, "espacos", espacoIdAtual, "unidadesMedida", u.id),
+    { abreviacao: ABREVIACOES_UNIDADE[u.nome.trim().toLowerCase()] }
+  )));
 }
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
@@ -483,6 +500,7 @@ function assinarUsuarioEEspaco(uid) {
 function reconectarEspaco(espacoId) {
   [unsubEspacoDoc, unsubGrupos, unsubLocais, unsubFormas, unsubUnidades, unsubItens, unsubListas].forEach((u) => u && u());
   garantirCatalogoSemeado(espacoId);
+  abreviacoesPadraoAplicadas = false;
 
   unsubEspacoDoc = onSnapshot(doc(bd, "espacos", espacoId), (snap) => {
     espacoAtual = snap.data() || { membros: [], membrosInfo: {} };
@@ -510,6 +528,7 @@ function reconectarEspaco(espacoId) {
   unsubUnidades = onSnapshot(collection(bd, "espacos", espacoId, "unidadesMedida"), (snap) => {
     unidadesAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     renderCadastroUnidades();
+    aplicarAbreviacoesPadraoUnidades();
   });
   unsubItens = onSnapshot(collection(bd, "espacos", espacoId, "itens"), (snap) => {
     itensAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
