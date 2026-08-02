@@ -1183,9 +1183,28 @@ async function carregarLocalMaisUsado() {
     localMaisUsadoId = null;
   }
 }
+// Preço por unidade do item aberto no modal (ex.: R$/kg) — usado pra recalcular "Valor pago"
+// sempre que a quantidade realmente comprada (peso na balança) for digitada.
+let valorUnitarioModalComprar = 0;
+function recalcularValorComprarPorQuantidade() {
+  const quantidade = Number($("#mc-quantidade").value) || 0;
+  $("#mc-valor").value = valorUnitarioModalComprar ? formatarMoeda(quantidade * valorUnitarioModalComprar) : "";
+}
 function abrirModalComprar(itemListaId) {
   itemListaPendenteId = itemListaId;
-  $("#mc-valor").value = "";
+  const item = itensListaAtuais.find((i) => i.id === itemListaId);
+  // Unidades fracionáveis (kg, g, ml, l) costumam ter o peso real definido só na balança do
+  // mercado — em vez de fazer a conta de cabeça, deixa informar a quantidade e calcula sozinho.
+  const fracionavel = unidadeAceitaFracao(item?.unidade);
+  valorUnitarioModalComprar = item?.valorProvisionado || 0;
+  $("#campo-mc-quantidade").classList.toggle("hidden", !fracionavel);
+  if (fracionavel) {
+    $("#mc-unidade-label").textContent = item.unidade || "";
+    $("#mc-quantidade").value = item.quantidade || "";
+    recalcularValorComprarPorQuantidade();
+  } else {
+    $("#mc-valor").value = "";
+  }
   // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
   // lembrando o último local escolhido (só falta informar o valor a cada item seguinte).
   const localSugerido = ultimoLocalUsadoId || localMaisUsadoId;
@@ -2384,6 +2403,7 @@ function ligarEventos() {
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
+  $("#mc-quantidade").addEventListener("input", recalcularValorComprarPorQuantidade);
   $("#overlay-comprar").addEventListener("click", (e) => { if (e.target.id === "overlay-comprar") fecharModalComprar(); });
 
   $("#btn-confirmar-quantidade").onclick = confirmarQuantidade;
