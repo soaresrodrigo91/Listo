@@ -175,8 +175,20 @@ const UNIDADES_PADRAO = [
   { nome: "ml", fracionavel: true }, { nome: "Rolo", fracionavel: false }, { nome: "Saco", fracionavel: false },
   { nome: "Unidade", fracionavel: false },
 ];
+// Abrevia as unidades padrão com forma curta conhecida (usado no "R$/un." da lista de compras);
+// unidade fora dessa lista (inclusive as que a pessoa cadastrar) usa o próprio nome, minúsculo.
+const ABREVIACOES_UNIDADE = { kg: "kg", gramas: "g", ml: "ml", unidade: "un." };
+function abreviarUnidade(nomeUnidade) {
+  // Prioriza a abreviação salva no cadastro da própria unidade; sem uma, cai na tabela padrão
+  // (unidades do seed); sem estar nem lá, usa o nome como está, em minúsculo.
+  const unidade = (unidadesAtuais || []).find((u) => u.nome === nomeUnidade);
+  if (unidade?.abreviacao) return unidade.abreviacao;
+  const chave = (nomeUnidade || "").trim().toLowerCase();
+  return ABREVIACOES_UNIDADE[chave] || chave || "un";
+}
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
+const ICONE_PESSOA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>';
 // SVG em vez de emoji: emoji tem cor própria e ignora a cor de fundo do botão (fica sempre com
 // as mesmas cores do sistema), enquanto o SVG com stroke="currentColor" acompanha o azul do fab.
 const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
@@ -904,6 +916,15 @@ async function desfazerEstatisticasFinalizacao(itensDaLista) {
     locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
   }, { merge: true });
 }
+// Apaga o histórico de preços gerado por uma lista específica (listaId), em qualquer item —
+// usado ao excluir a lista e ao reabri-la (reabrir exige finalizar de novo pra gravar o que for
+// editado, então o histórico da rodada anterior teria dados incompletos/desatualizados).
+async function apagarHistoricoDaLista(listaId) {
+  await Promise.all(itensAtuais.map(async (item) => {
+    const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), where("listaId", "==", listaId)));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  }));
+}
 async function excluirListaAtual() {
   const id = $("#fn-id").value;
   if (!id) return;
@@ -917,10 +938,7 @@ async function excluirListaAtual() {
   const itensSnap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", id, "itensLista"));
   const itensDaLista = itensSnap.docs.map((d) => d.data());
   await Promise.all(itensSnap.docs.map((d) => deleteDoc(d.ref)));
-  await Promise.all(itensAtuais.map(async (item) => {
-    const snap = await getDocs(query(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), where("listaId", "==", id)));
-    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-  }));
+  await apagarHistoricoDaLista(id);
   if (lista?.finalizadaEm) await desfazerEstatisticasFinalizacao(itensDaLista);
   await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", id));
   irParaTela("listas");
@@ -1088,6 +1106,10 @@ function renderListaDetalhe() {
       <span class="valor">${formatarMoeda(valorTotal)}</span>
     </div>`;
   $("#btn-abrir-editar-lista").onclick = () => abrirFormEditarLista(lista);
+  // Lista finalizada: nada de marcar, editar quantidade ou incluir item novo — só dá pra excluir
+  // a lista inteira ou reabri-la primeiro (reabrir já libera tudo de novo).
+  if (lista.finalizadaEm) fecharFormAdicionarItem();
+  $("#wrap-adicionar-item").classList.toggle("hidden", !!lista.finalizadaEm);
 
   itens = [...itens].sort((a, b) => {
     if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
@@ -1105,18 +1127,21 @@ function renderListaDetalhe() {
         // Itens adicionados antes de marca/descrição existirem no itensLista caem no cadastro atual.
         const catalogo = itensAtuais.find((it) => it.id === i.itemId);
         const partes = [i.marca ?? catalogo?.marca, i.descricao ?? catalogo?.descricao, i.descricaoUnidade ?? catalogo?.descricaoUnidade].filter(Boolean);
-        const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("")
-          + (espacoCompartilhado && i.adicionadoPorNome ? `<span>${partes.length ? "· " : ""}${esc(i.adicionadoPorNome)}</span>` : "");
+        const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("");
+        const adicionadoPor = espacoCompartilhado && i.adicionadoPorNome
+          ? `<div class="adicionado-por">${ICONE_PESSOA}${esc(i.adicionadoPorNome)}</div>`
+          : "";
         return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
-        <button class="chk" data-acao="marcar">✓</button>
+        <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
         <div class="info">
           <div class="nome">${esc(i.nome)}</div>
-          <div class="detalhe">${detalhe}</div>
+          ${detalhe ? `<div class="detalhe">${detalhe}</div>` : ""}
+          ${adicionadoPor}
         </div>
-        <button class="btn-qtd" data-acao="qtd">${esc(formatarQuantidadeLista(i))}</button>
+        <button class="btn-qtd" data-acao="qtd" ${lista.finalizadaEm ? "disabled" : ""}>${esc(formatarQuantidadeLista(i))}</button>
         <div class="valor-linha">
-          <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/un.</span>
+          <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/${esc(abreviarUnidade(i.unidade))}</span>
           <span class="valor">${formatarMoeda(i.subtotal)}</span>
         </div>
         ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
@@ -1163,8 +1188,9 @@ function renderListaDetalhe() {
 }
 async function reabrirLista() {
   if (!listaAbertaId) return;
-  if (!confirm("Reabrir esta lista? Você poderá voltar a adicionar e excluir itens. O histórico de preços já registrado nesta compra não é desfeito, mas as estatísticas de itens/grupos/locais mais usados dessa compra são desfeitas (voltam a contar quando a lista for finalizada de novo).")) return;
+  if (!confirm("Reabrir esta lista? Você poderá voltar a marcar, editar e excluir itens. Como vai precisar finalizar de novo pra gravar o que for alterado, o histórico de preços e as estatísticas dessa compra são apagados agora (voltam a existir quando a lista for finalizada de novo).")) return;
   await desfazerEstatisticasFinalizacao(itensListaAtuais);
+  await apagarHistoricoDaLista(listaAbertaId);
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
     finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
   });
@@ -2247,6 +2273,7 @@ function abrirFormNovaUnidade() {
   telaAnterior = "cadastro-unidades";
   $("#fu-id").value = "";
   $("#fu-nome").value = "";
+  $("#fu-abreviacao").value = "";
   fracionavelUnidadeSelecionado = null;
   renderOpcoesFracionavelUnidade();
   $("#btn-excluir-unidade").classList.add("hidden");
@@ -2257,6 +2284,9 @@ function abrirFormEditarUnidade(unidade) {
   telaAnterior = "cadastro-unidades";
   $("#fu-id").value = unidade.id;
   $("#fu-nome").value = unidade.nome;
+  // Sem abreviação salva ainda, sugere a padrão conhecida (kg, g, ml, un.) se houver uma pra
+  // esse nome — só como ponto de partida, continua editável e é gravada explícita ao salvar.
+  $("#fu-abreviacao").value = unidade.abreviacao ?? ABREVIACOES_UNIDADE[unidade.nome.trim().toLowerCase()] ?? "";
   // Unidade antiga sem o campo cadastrado: pré-preenche com o heurístico por nome, mas
   // ainda assim grava um valor explícito da próxima vez que for salva.
   fracionavelUnidadeSelecionado = unidadeAceitaFracao(unidade.nome) ? "sim" : "nao";
@@ -2284,7 +2314,7 @@ async function salvarUnidade() {
     ]);
     if (!confirma) return;
   }
-  const dados = { nome, fracionavel: fracionavelUnidadeSelecionado === "sim" };
+  const dados = { nome, fracionavel: fracionavelUnidadeSelecionado === "sim", abreviacao: $("#fu-abreviacao").value.trim() || null };
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), dados);
   } else {

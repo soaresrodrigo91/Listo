@@ -1288,6 +1288,12 @@ main::-webkit-scrollbar {
   gap: 6px;
   flex-wrap: wrap;
 }
+.item .adicionado-por {
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-top: 2px;
+}
 .item .valor {
   font-family: "Sora";
   font-weight: 800;
@@ -1331,6 +1337,10 @@ main::-webkit-scrollbar {
   flex-shrink: 0;
   font-size: 15px;
   color: transparent;
+}
+.chk:disabled,
+.btn-qtd:disabled {
+  opacity: 0.5;
 }
 .item.comprado .chk {
   background: var(--green);
