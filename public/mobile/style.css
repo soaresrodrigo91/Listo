@@ -1146,6 +1146,9 @@ main::-webkit-scrollbar {
 .card-lista.status-comprada {
   border-left-color: var(--status-verde);
 }
+.card-lista.status-vazia {
+  border-left-color: var(--line);
+}
 .card-lista-topo {
   display: flex;
   align-items: flex-start;
@@ -1171,6 +1174,9 @@ main::-webkit-scrollbar {
 }
 .badge-status.comprada {
   background: var(--status-verde);
+}
+.badge-status.vazia {
+  background: var(--muted);
 }
 .card-lista-obs {
   font-size: 12px;

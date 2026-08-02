@@ -699,8 +699,12 @@ function renderCarrosselProximaCompra(pendentes) {
     $("#dash-itens-pendentes").textContent = String(Math.max((lista.qtdItens || 0) - (lista.qtdComprados || 0), 0));
     pontos.querySelectorAll("span").forEach((s, i) => s.classList.toggle("ativo", i === idx));
     carrossel.dataset.idSelecionado = lista.id;
+    // Lista recém-criada, ainda sem nenhum item, tecnicamente já nasce com status "pendente" —
+    // mas não tem nada pendente de verdade ainda, então fica na cor neutra (azul) até ganhar
+    // o primeiro item.
     const status = lista.status || "pendente";
-    $("#card-lista-proxima").classList.toggle("status-pendente", status === "pendente");
+    const temItens = (lista.qtdItens || 0) > 0;
+    $("#card-lista-proxima").classList.toggle("status-pendente", status === "pendente" && temItens);
     $("#card-lista-proxima").classList.toggle("status-parcial", status === "parcial");
   }
 
@@ -752,6 +756,9 @@ function renderCarrosselListas() {
     .map((l) => {
       const status = l.status || "pendente";
       const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
+      // Lista recém-criada, sem nenhum item ainda, nasce com status "pendente" — mas não tem
+      // nada pendente de verdade, então fica neutra em vez de vermelha até ganhar o 1º item.
+      const classeVisual = (l.qtdItens || 0) === 0 ? "vazia" : status;
       const comprados = l.qtdComprados || 0;
       const pendentes = Math.max((l.qtdItens || 0) - comprados, 0);
       // Concluída: mostra provisionado x real e a diferença, pra saber na hora se a compra saiu
@@ -765,14 +772,14 @@ function renderCarrosselListas() {
             <span style="color:${corDiferenca}">Diferença: ${diferenca > 0 ? "+" : ""}${formatarMoeda(diferenca)}</span>
           </div>`
         : "";
-      return `<div class="card-lista status-${status}" data-id="${l.id}">
+      return `<div class="card-lista status-${classeVisual}" data-id="${l.id}">
         <div class="card-lista-topo">
           <div>
             <div class="card-lista-titulo">${esc(l.nome)}</div>
             ${l.finalizadaEm ? `<div class="card-lista-obs">${ICONE_CALENDARIO}Concluída em ${formatarDataHoraBR(l.finalizadaEm)}</div>` : ""}
             ${l.observacoes ? `<div class="card-lista-obs">${esc(l.observacoes)}</div>` : ""}
           </div>
-          <span class="badge-status ${status}">${l.permanente ? "Permanente" : rotuloStatus}</span>
+          <span class="badge-status ${classeVisual}">${l.permanente ? "Permanente" : rotuloStatus}</span>
         </div>
         <div class="card-lista-rodape">
           <span>${l.qtdItens || 0} Item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
@@ -1033,6 +1040,9 @@ function renderListaDetalhe() {
 
   const status = lista.status || "pendente";
   const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
+  // Mesma regra do card da lista de compras: sem nenhum item ainda, fica neutra em vez de
+  // vermelha mesmo com status "pendente".
+  const classeVisualStatus = (lista.qtdItens || 0) === 0 ? "vazia" : status;
 
   const gruposDaLista = [...new Set(itensListaAtuais.map((i) => i.grupoNome).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   renderChips("#filtros-lista-grupo", gruposDaLista, filtroGrupoLista, (v) => { filtroGrupoLista = v; renderListaDetalhe(); });
@@ -1048,7 +1058,7 @@ function renderListaDetalhe() {
   $("#lista-detalhe-cabecalho").innerHTML = `
     <div class="detalhe-titulo-credor">
       <span class="detalhe-nome-lista">${esc(lista.nome)}</span>
-      <span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span>
+      <span class="badge-status ${classeVisualStatus}">${lista.permanente ? "Permanente" : rotuloStatus}</span>
       <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     </div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
