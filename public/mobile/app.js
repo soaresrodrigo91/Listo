@@ -875,49 +875,6 @@ async function desfazerEstatisticasFinalizacao(itensDaLista) {
     locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
   }, { merge: true });
 }
-// Recalcula "itens/grupos/locais mais usados" (Configurações) do zero, direto do histórico de
-// preços atual — corrige qualquer resíduo deixado por exclusões antigas (antes do desconto
-// automático existir) sem depender de reconstruir o que já foi apagado.
-async function recalcularEstatisticasGerais() {
-  if (!confirm("Isso remove registros de histórico de preço órfãos (de listas já excluídas) e recalcula do zero as estatísticas de itens/grupos/locais mais usados. Continuar?")) return;
-  const btn = $("#btn-recalcular-estatisticas");
-  btn.disabled = true;
-  try {
-    // Antes da limpeza automática existir (exclusão de lista apagando o histórico dela junto),
-    // excluir uma lista finalizada deixava esses registros pra trás — sem lista de origem, viram
-    // resíduo permanente nas comparações. Remove quem aponta pra um listaId que não existe mais.
-    const idsListasExistentes = new Set(listasAtuais.map((l) => l.id));
-    const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
-    for (const item of itensAtuais) {
-      const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-      const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // Sem o "r.listaId &&" de antes: registro real sem listaId nenhum (resíduo bem antigo,
-      // de antes desse campo existir) também conta como órfão, não só o que aponta pra um id
-      // que não existe mais.
-      const orfaos = todos.filter((r) => !r.origemCadastro && !idsListasExistentes.has(r.listaId));
-      await Promise.all(orfaos.map((r) => deleteDoc(doc(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos", r.id))));
-      const idsOrfaos = new Set(orfaos.map((r) => r.id));
-      const reais = todos.filter((r) => !r.origemCadastro && !idsOrfaos.has(r.id));
-      if (reais.length === 0) continue;
-      contagemItens[item.id] = reais.length;
-      const grupo = item.grupoNome || "Outros";
-      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + reais.length;
-      reais.forEach((r) => {
-        if (r.localId) contagemLocais[r.localId] = (contagemLocais[r.localId] || 0) + 1;
-      });
-    }
-    await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-      itens: contagemItens, grupos: contagemGrupos, locais: contagemLocais,
-    });
-    // estatisticas/geral não tem listener ao vivo (só é lido quando o dashboard renderiza) —
-    // sem isso, a tela Início continuaria mostrando os números antigos até navegar pra outro
-    // lugar e voltar.
-    renderDashboard();
-    exibirSucesso("Estatísticas recalculadas!");
-  } finally {
-    btn.disabled = false;
-  }
-}
 async function excluirListaAtual() {
   const id = $("#fn-id").value;
   if (!id) return;
@@ -2845,7 +2802,6 @@ function ligarEventos() {
   });
   $("#btn-confirmar-enviar-lista").onclick = confirmarEnvioParaLista;
   $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
-  $("#btn-recalcular-estatisticas").onclick = recalcularEstatisticasGerais;
 
   const chaveTema = $("#chave-tema-escuro");
   const temaEscuroSalvo = document.documentElement.getAttribute("data-tema") === "escuro";
