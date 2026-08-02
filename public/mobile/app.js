@@ -95,17 +95,18 @@ function renderOpcoesFracionavelUnidade() {
 function esc(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-// Usado ao salvar cadastros (item, lista, grupo, local, forma de pagamento, unidade) pra avisar
-// antes de criar um duplicado. Ignora acento/maiúscula e considera "parecido" quando um nome
-// contém o outro (ex.: "Arroz" bate com "Arroz Branco") — evita virar um comparador difuso complexo.
+// Usado só ao criar um cadastro novo (item, lista, grupo, local, forma de pagamento, unidade)
+// pra avisar antes de gerar um duplicado — editar um cadastro já existente nunca dispara esse
+// aviso, mesmo que o nome resulte igual a outro. Ignora acento/maiúscula e considera "parecido"
+// quando um nome contém o outro (ex.: "Arroz" bate com "Arroz Branco") — evita virar um
+// comparador difuso complexo.
 function normalizarTexto(s) {
   return (s || "").trim().toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
 }
-function encontrarNomeParecido(nome, lista, idAtual) {
+function encontrarNomeParecido(nome, lista) {
   const alvo = normalizarTexto(nome);
   if (!alvo) return null;
   return lista.find((item) => {
-    if (idAtual && item.id === idAtual) return false;
     const existente = normalizarTexto(item.nome);
     if (!existente) return false;
     if (existente === alvo) return true;
@@ -793,7 +794,7 @@ async function salvarLista() {
     mostrarMsg("#msg-form-lista", "Preencha o nome da lista.", "erro");
     return;
   }
-  const parecida = encontrarNomeParecido(nome, listasAtuais, id);
+  const parecida = id ? null : encontrarNomeParecido(nome, listasAtuais);
   if (parecida) {
     const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[parecida.status || "pendente"];
     const confirma = confirmarApesarDeParecido([
@@ -1659,7 +1660,7 @@ async function salvarItem() {
     mostrarMsg("#msg-form-item", "Digite a unidade e selecione uma das sugestões.", "erro");
     return;
   }
-  const parecido = encontrarNomeParecido(nome, itensAtuais, id);
+  const parecido = id ? null : encontrarNomeParecido(nome, itensAtuais);
   if (parecido) {
     const confirma = confirmarApesarDeParecido([
       `Nome: ${parecido.nome}`,
@@ -1735,7 +1736,7 @@ async function salvarGrupo() {
     mostrarMsg("#msg-form-grupo", "Informe o nome do grupo.", "erro");
     return;
   }
-  const parecido = encontrarNomeParecido(nome, gruposAtuais, id);
+  const parecido = id ? null : encontrarNomeParecido(nome, gruposAtuais);
   if (parecido) {
     const confirma = confirmarApesarDeParecido([
       `Nome: ${parecido.nome}`,
@@ -1906,7 +1907,7 @@ async function salvarLocal() {
     mostrarMsg("#msg-form-local", "Informe o nome do local.", "erro");
     return;
   }
-  const parecido = encontrarNomeParecido(nome, locaisAtuais, id);
+  const parecido = id ? null : encontrarNomeParecido(nome, locaisAtuais);
   if (parecido) {
     const confirma = confirmarApesarDeParecido([
       `Nome: ${parecido.nome}`,
@@ -1982,7 +1983,7 @@ async function salvarForma() {
     mostrarMsg("#msg-form-forma", "Informe o nome da forma de pagamento.", "erro");
     return;
   }
-  const parecida = encontrarNomeParecido(nome, formasAtuais, id);
+  const parecida = id ? null : encontrarNomeParecido(nome, formasAtuais);
   if (parecida && !confirmarApesarDeParecido([`Nome: ${parecida.nome}`])) return;
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "formasPagamento", id), { nome });
@@ -2050,7 +2051,7 @@ async function salvarUnidade() {
     mostrarMsg("#msg-form-unidade", "Selecione se a unidade aceita quantidade fracionada.", "erro");
     return;
   }
-  const parecida = encontrarNomeParecido(nome, unidadesAtuais, id);
+  const parecida = id ? null : encontrarNomeParecido(nome, unidadesAtuais);
   if (parecida) {
     const confirma = confirmarApesarDeParecido([
       `Nome: ${parecida.nome}`,
