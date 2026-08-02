@@ -1530,6 +1530,22 @@ main::-webkit-scrollbar {
 .chave.ligada .chave-bolinha {
   transform: translateX(16px);
 }
+.opcao-valor-prov {
+  cursor: pointer;
+}
+.radio-marca {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.radio-marca.selecionado {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: inset 0 0 0 3px var(--card);
+}
 
 /* ---------- perfil (foto + dados) ---------- */
 .perfil-foto-linha {

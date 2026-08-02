@@ -530,7 +530,7 @@ function renderSugestoesItemLista(query) {
   }
   container.innerHTML = encontrados
     .map((i) => {
-      const detalhe = [i.descricao, i.descricaoUnidade].filter(Boolean).join(" · ");
+      const detalhe = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean).join(" · ");
       return `<div class="autocomplete-item" data-id="${i.id}"><span>${esc(i.nome)}</span><span class="grupo">${esc(detalhe)}</span></div>`;
     })
     .join("");
@@ -791,12 +791,6 @@ function renderListaDetalhe() {
 
   const status = lista.status || "pendente";
   const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
-  $("#lista-detalhe-cabecalho").innerHTML = `
-    <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
-    <div class="card-lista-rodape" style="margin-bottom:6px">
-      <span>${lista.qtdComprados || 0}/${lista.qtdItens || 0} itens</span>
-      <span class="valor">${formatarMoeda(lista.valorProvisionadoTotal || 0)}</span>
-    </div>`;
 
   const gruposDaLista = [...new Set(itensListaAtuais.map((i) => i.grupoNome).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   renderChips("#filtros-lista-grupo", gruposDaLista, filtroGrupoLista, (v) => { filtroGrupoLista = v; renderListaDetalhe(); });
@@ -807,6 +801,18 @@ function renderListaDetalhe() {
   let itens = itensListaAtuais;
   if (filtroGrupoLista) itens = itens.filter((i) => i.grupoNome === filtroGrupoLista);
   if (filtroLocalLista) itens = itens.filter((i) => locaisAtuais.find((l) => l.id === i.localCompraId)?.nome === filtroLocalLista);
+
+  // Contagem e total no cabeçalho seguem o filtro atual: com "Todos" é a lista inteira,
+  // filtrando por grupo/local mostra só a fatia filtrada.
+  const qtdComprados = itens.filter((i) => i.comprado).length;
+  const valorTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
+  $("#lista-detalhe-cabecalho").innerHTML = `
+    <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
+    <div class="card-lista-rodape" style="margin-bottom:6px">
+      <span>${qtdComprados}/${itens.length} itens</span>
+      <span class="valor">${formatarMoeda(valorTotal)}</span>
+    </div>`;
+
   itens = [...itens].sort((a, b) => {
     if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
     return (a.grupoNome || "").localeCompare(b.grupoNome || "") || a.nome.localeCompare(b.nome, "pt-BR");
@@ -870,22 +876,27 @@ function renderListaDetalhe() {
 // Preferência (Configurações) de qual valor usar como estimativa ao adicionar um item numa lista:
 // valor cadastrado no item, último valor comprado (qualquer local) ou o mais barato já registrado.
 const OPCOES_VALOR_PROVISIONADO = [
-  { valor: "cadastro", rotulo: "Valor do cadastro" },
   { valor: "ultimo", rotulo: "Último valor comprado" },
+  { valor: "cadastro", rotulo: "Valor do cadastro" },
   { valor: "barato", rotulo: "Valor mais barato" },
 ];
 function preferenciaValorProvisionado() {
   try { return localStorage.getItem("prefValorProvisionado") || "ultimo"; } catch { return "ultimo"; }
 }
+// Lista vertical de opção única (estilo rádio) — nunca mais de uma marcada ao mesmo tempo,
+// já que a preferência é um único valor salvo (não um conjunto).
 function renderOpcoesValorProvisionado() {
   const atual = preferenciaValorProvisionado();
   const container = $("#opcoes-valor-provisionado");
   container.innerHTML = OPCOES_VALOR_PROVISIONADO
-    .map((o) => `<button type="button" class="chip ${o.valor === atual ? "ativo" : ""}" data-valor="${o.valor}">${esc(o.rotulo)}</button>`)
+    .map((o) => `<div class="detalhe-linha opcao-valor-prov" data-valor="${o.valor}">
+      <span class="rotulo">${esc(o.rotulo)}</span>
+      <span class="radio-marca ${o.valor === atual ? "selecionado" : ""}"></span>
+    </div>`)
     .join("");
-  container.querySelectorAll(".chip").forEach((btn) => {
-    btn.onclick = () => {
-      try { localStorage.setItem("prefValorProvisionado", btn.dataset.valor); } catch {}
+  container.querySelectorAll(".opcao-valor-prov").forEach((el) => {
+    el.onclick = () => {
+      try { localStorage.setItem("prefValorProvisionado", el.dataset.valor); } catch {}
       renderOpcoesValorProvisionado();
     };
   });
@@ -2141,10 +2152,14 @@ function ligarEventos() {
     $("#ld-item-nome").focus();
   };
   // Clicar fora do formulário de adicionar item (com ele aberto) equivale a desistir: recolhe de volta pra linha.
+  // Usa composedPath() (caminho capturado no momento do clique) em vez de e.target: escolher uma
+  // sugestão apaga o container (innerHTML = "") no mesmo clique, o que desconecta o elemento
+  // clicado do documento — e um e.target desconectado sempre falha em form.contains(e.target).
   document.addEventListener("click", (e) => {
     const form = $("#form-adicionar-item");
     if (form.classList.contains("hidden")) return;
-    if (form.contains(e.target) || e.target.closest("#btn-abrir-form-add-item")) return;
+    const caminho = e.composedPath();
+    if (caminho.includes(form) || caminho.includes($("#btn-abrir-form-add-item"))) return;
     fecharFormAdicionarItem();
   });
   $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
