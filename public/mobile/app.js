@@ -1001,11 +1001,14 @@ function renderListaDetalhe() {
     container.innerHTML = `<div class="vazio">Nenhum item nesta lista ainda.</div>`;
   } else {
     container.innerHTML = itens
-      .map((i) => `
+      .map((i) => {
+        // Itens adicionados antes do campo "marca" existir no itensLista caem no cadastro atual.
+        const marca = i.marca ?? itensAtuais.find((it) => it.id === i.itemId)?.marca;
+        return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
         <button class="chk" data-acao="marcar">✓</button>
         <div class="info">
-          <div class="nome">${esc(i.nome)}</div>
+          <div class="nome">${esc(i.nome)}${marca ? ` ${esc(marca)}` : ""}</div>
           <div class="detalhe"><button class="btn-qtd" data-acao="qtd">${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""} ✎</button>${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
         </div>
         <div class="valor-linha">
@@ -1013,7 +1016,8 @@ function renderListaDetalhe() {
           <span class="valor">${formatarMoeda(i.subtotal)}</span>
         </div>
         <button class="btn-excluir-linha" data-acao="excluir">✕</button>
-      </div>`)
+      </div>`;
+      })
       .join("");
     container.querySelectorAll('[data-acao="marcar"]').forEach((btn) => {
       btn.onclick = (e) => {
@@ -1146,7 +1150,7 @@ async function adicionarItemNaLista() {
   const valorProvisionado = await valorProvisionadoParaItem(item);
   const adicionadoPorNome = nomeExibicaoUsuario();
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
-    itemId, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
+    itemId, nome: item.nome, marca: item.marca || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
@@ -1441,7 +1445,7 @@ async function enviarItemParaLista(item, listaId) {
   const adicionadoPorNome = nomeExibicaoUsuario();
   const valorProvisionado = await valorProvisionadoParaItem(item);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
-    itemId: item.id, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
+    itemId: item.id, nome: item.nome, marca: item.marca || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
@@ -2404,7 +2408,6 @@ function ligarBuscaCadastro(chave, idFab, idWrap, idInput, renderizar) {
   fab.onclick = () => {
     const abrindo = wrap.classList.contains("hidden");
     wrap.classList.toggle("hidden", !abrindo);
-    fab.classList.toggle("ativo", abrindo);
     fab.textContent = abrindo ? "✕" : "🔍";
     if (abrindo) {
       input.focus();

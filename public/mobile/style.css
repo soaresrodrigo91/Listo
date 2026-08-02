@@ -1460,19 +1460,7 @@ main::-webkit-scrollbar {
 }
 .fab.fab-busca {
   right: 90px;
-  width: 48px;
-  height: 48px;
-  font-size: 18px;
-  font-weight: 400;
-  background: var(--card);
-  color: var(--muted);
-  border: 1px solid var(--borda-glass);
-  box-shadow: 0 6px 16px var(--card-shadow-sm);
-}
-.fab.fab-busca.ativo {
-  background: var(--primary);
-  color: var(--primary-ink);
-  border-color: var(--primary);
+  font-size: 22px;
 }
 .busca-cadastro-wrap {
   padding: 10px 16px 6px;
@@ -1722,5 +1710,8 @@ main::-webkit-scrollbar {
   .fab,
   .fab-speeddial {
     right: calc(50% - (var(--frame-width) / 2) + 20px);
+  }
+  .fab.fab-busca {
+    right: calc(50% - (var(--frame-width) / 2) + 90px);
   }
 }
