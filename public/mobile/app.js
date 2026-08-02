@@ -54,6 +54,14 @@ function unidadeAceitaFracao(nomeUnidade) {
   if (unidade && typeof unidade.fracionavel === "boolean") return unidade.fracionavel;
   return UNIDADES_FRACIONAVEIS.has((nomeUnidade || "").trim().toLowerCase());
 }
+// Quantidade do item na lista de compras, formatada de forma compacta pro chip clicável do meio
+// da linha: unidade não fracionável mostra só o número (ex.: 1, 12, 13); fracionável mostra o
+// número com vírgula colado na unidade, sem espaço (ex.: 200g, 3,5kg).
+function formatarQuantidadeLista(item) {
+  if (!unidadeAceitaFracao(item.unidade)) return String(item.quantidade);
+  const numero = Number(item.quantidade || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return `${numero}${(item.unidade || "").toLowerCase()}`;
+}
 // Ajusta um campo de quantidade pra unidade atual: guarda a unidade no dataset (lido pelo
 // sanitizador de digitação abaixo), troca o teclado numérico do celular e o step do spinner.
 function configurarCampoQuantidade(input, nomeUnidade) {
@@ -164,6 +172,10 @@ const UNIDADES_PADRAO = [
 ];
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
+// SVG em vez de emoji: emoji tem cor própria e ignora a cor de fundo do botão (fica sempre com
+// as mesmas cores do sistema), enquanto o SVG com stroke="currentColor" acompanha o azul do fab.
+const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
+const ICONE_FECHAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
 
 /* ---------- estado ---------- */
 let auth = null, bd = null, usuario = null;
@@ -745,7 +757,7 @@ function renderCarrosselListas() {
           <span class="badge-status ${status}">${l.permanente ? "Permanente" : rotuloStatus}</span>
         </div>
         <div class="card-lista-rodape">
-          <span>${l.qtdItens || 0} item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
+          <span>${l.qtdItens || 0} Item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
           <span class="valor">${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
         </div>
         <div class="card-lista-resumo-itens">
@@ -1002,15 +1014,19 @@ function renderListaDetalhe() {
   } else {
     container.innerHTML = itens
       .map((i) => {
-        // Itens adicionados antes do campo "marca" existir no itensLista caem no cadastro atual.
-        const marca = i.marca ?? itensAtuais.find((it) => it.id === i.itemId)?.marca;
+        // Itens adicionados antes de marca/descrição existirem no itensLista caem no cadastro atual.
+        const catalogo = itensAtuais.find((it) => it.id === i.itemId);
+        const partes = [i.marca ?? catalogo?.marca, i.descricao ?? catalogo?.descricao, i.descricaoUnidade ?? catalogo?.descricaoUnidade].filter(Boolean);
+        const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("")
+          + (espacoCompartilhado && i.adicionadoPorNome ? `<span>${partes.length ? "· " : ""}adicionado por ${esc(i.adicionadoPorNome)}</span>` : "");
         return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
         <button class="chk" data-acao="marcar">✓</button>
         <div class="info">
-          <div class="nome">${esc(i.nome)}${marca ? ` ${esc(marca)}` : ""}</div>
-          <div class="detalhe"><button class="btn-qtd" data-acao="qtd">${i.quantidade}${i.unidade ? ` ${esc(i.unidade)}` : ""} ✎</button>${espacoCompartilhado && i.adicionadoPorNome ? `<span>· adicionado por ${esc(i.adicionadoPorNome)}</span>` : ""}</div>
+          <div class="nome">${esc(i.nome)}</div>
+          <div class="detalhe">${detalhe}</div>
         </div>
+        <button class="btn-qtd" data-acao="qtd">${esc(formatarQuantidadeLista(i))}</button>
         <div class="valor-linha">
           <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/un.</span>
           <span class="valor">${formatarMoeda(i.subtotal)}</span>
@@ -1150,7 +1166,8 @@ async function adicionarItemNaLista() {
   const valorProvisionado = await valorProvisionadoParaItem(item);
   const adicionadoPorNome = nomeExibicaoUsuario();
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
-    itemId, nome: item.nome, marca: item.marca || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
+    itemId, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
+    descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
@@ -1364,6 +1381,7 @@ async function renderCadastroItens() {
   // grupo, e limitar à aba "Todos" implicitamente é mais previsível do que manter o recorte.
   if (termo) lista = lista.filter((i) => normalizarTexto(i.nome).includes(termo));
   else if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
+  $("#total-itens").textContent = `${lista.length} Item${lista.length === 1 ? "" : "s"}`;
   const container = $("#lista-cadastro-itens");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhum item encontrado." : "Nenhum item cadastrado."}</div>`;
@@ -1445,7 +1463,8 @@ async function enviarItemParaLista(item, listaId) {
   const adicionadoPorNome = nomeExibicaoUsuario();
   const valorProvisionado = await valorProvisionadoParaItem(item);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
-    itemId: item.id, nome: item.nome, marca: item.marca || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
+    itemId: item.id, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
+    descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
@@ -1711,6 +1730,7 @@ async function excluirItemAtual() {
 function renderCadastroGrupos() {
   const termo = normalizarTexto(termoBuscaCadastro.grupos);
   const lista = termo ? gruposAtuais.filter((g) => normalizarTexto(g.nome).includes(termo)) : gruposAtuais;
+  $("#total-grupos").textContent = `${lista.length} Grupo${lista.length === 1 ? "" : "s"}`;
   const container = $("#lista-cadastro-grupos");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhum grupo encontrado." : "Nenhum grupo cadastrado."}</div>`;
@@ -1782,6 +1802,7 @@ async function excluirGrupoAtual() {
 function renderCadastroLocais() {
   const termo = normalizarTexto(termoBuscaCadastro.locais);
   const lista = termo ? locaisAtuais.filter((l) => normalizarTexto(l.nome).includes(termo)) : locaisAtuais;
+  $("#total-locais").textContent = `${lista.length} ${lista.length === 1 ? "Local" : "Locais"}`;
   const container = $("#lista-cadastro-locais");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhum local encontrado." : "Nenhum local cadastrado."}</div>`;
@@ -1966,6 +1987,7 @@ async function excluirLocalAtual() {
 function renderCadastroFormas() {
   const termo = normalizarTexto(termoBuscaCadastro.formas);
   const lista = termo ? formasAtuais.filter((f) => normalizarTexto(f.nome).includes(termo)) : formasAtuais;
+  $("#total-formas").textContent = `${lista.length} Forma${lista.length === 1 ? "" : "s"} de pagamento`;
   const container = $("#lista-cadastro-formas");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhuma forma de pagamento encontrada." : "Nenhuma forma de pagamento cadastrada."}</div>`;
@@ -2026,6 +2048,7 @@ async function excluirFormaAtual() {
 function renderCadastroUnidades() {
   const termo = normalizarTexto(termoBuscaCadastro.unidades);
   const lista = termo ? unidadesAtuais.filter((u) => normalizarTexto(u.nome).includes(termo)) : unidadesAtuais;
+  $("#total-unidades").textContent = `${lista.length} Unidade${lista.length === 1 ? "" : "s"} de medida`;
   const container = $("#lista-cadastro-unidades");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhuma unidade encontrada." : "Nenhuma unidade de medida cadastrada."}</div>`;
@@ -2405,10 +2428,11 @@ function observarSaudacao() {
 // real a cada tecla digitada, sem precisar de um botão "buscar" separado.
 function ligarBuscaCadastro(chave, idFab, idWrap, idInput, renderizar) {
   const fab = $(idFab), wrap = $(idWrap), input = $(idInput);
+  fab.innerHTML = ICONE_LUPA;
   fab.onclick = () => {
     const abrindo = wrap.classList.contains("hidden");
     wrap.classList.toggle("hidden", !abrindo);
-    fab.textContent = abrindo ? "✕" : "🔍";
+    fab.innerHTML = abrindo ? ICONE_FECHAR : ICONE_LUPA;
     if (abrindo) {
       input.focus();
     } else {

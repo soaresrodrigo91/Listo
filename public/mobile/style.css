@@ -1239,6 +1239,7 @@ main::-webkit-scrollbar {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 2px 8px;
+  flex-shrink: 0;
 }
 .btn-qtd:active {
   background: var(--bg);
@@ -1460,11 +1461,6 @@ main::-webkit-scrollbar {
 }
 .fab.fab-busca {
   right: 90px;
-  font-size: 22px;
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--borda-glass);
-  box-shadow: 0 10px 24px var(--card-shadow);
 }
 .busca-cadastro-wrap {
   padding: 10px 16px 6px;
@@ -1479,6 +1475,20 @@ main::-webkit-scrollbar {
   background: var(--card);
   color: var(--text);
   font-size: 14px;
+}
+.total-cadastro {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 2px 4px;
+}
+/* Duas fabs lado a lado (lupa + "+") nas telas de cadastro precisam de mais espaço embaixo da
+   lista do que o padding padrão do main, senão cobrem o último item ao rolar até o fim. */
+#tela-cadastro-itens main,
+#tela-cadastro-grupos main,
+#tela-cadastro-locais main,
+#tela-cadastro-formas main,
+#tela-cadastro-unidades main {
+  padding-bottom: 150px;
 }
 #fab-inicio.aberto {
   transform: rotate(45deg);
