@@ -188,6 +188,7 @@ let localMaisUsadoId = null;
 let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroGrupoItens = null;
 let fracionavelUnidadeSelecionado = null;
+const termoBuscaCadastro = { itens: "", grupos: "", locais: "", formas: "", unidades: "" };
 
 let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais = null,
   unsubFormas = null, unsubUnidades = null, unsubItens = null, unsubListas = null, unsubItensLista = null, unsubConvites = null,
@@ -1353,11 +1354,15 @@ function renderChipsFiltroLocal() { /* usado dentro de renderListaDetalhe */ }
 
 async function renderCadastroItens() {
   renderChipsFiltroGrupo();
+  const termo = normalizarTexto(termoBuscaCadastro.itens);
   let lista = itensAtuais;
-  if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
+  // Buscando, ignora o filtro de grupo selecionado — o item pesquisado pode estar em qualquer
+  // grupo, e limitar à aba "Todos" implicitamente é mais previsível do que manter o recorte.
+  if (termo) lista = lista.filter((i) => normalizarTexto(i.nome).includes(termo));
+  else if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
   const container = $("#lista-cadastro-itens");
   if (lista.length === 0) {
-    container.innerHTML = `<div class="vazio">Nenhum item cadastrado.</div>`;
+    container.innerHTML = `<div class="vazio">${termo ? "Nenhum item encontrado." : "Nenhum item cadastrado."}</div>`;
     return;
   }
   // Mesma regra de preferência (Configurações) usada ao adicionar o item numa lista: valor do
@@ -1699,12 +1704,14 @@ async function excluirItemAtual() {
 
 /* ---------- cadastro: grupos ---------- */
 function renderCadastroGrupos() {
+  const termo = normalizarTexto(termoBuscaCadastro.grupos);
+  const lista = termo ? gruposAtuais.filter((g) => normalizarTexto(g.nome).includes(termo)) : gruposAtuais;
   const container = $("#lista-cadastro-grupos");
-  if (gruposAtuais.length === 0) {
-    container.innerHTML = `<div class="vazio">Nenhum grupo cadastrado.</div>`;
+  if (lista.length === 0) {
+    container.innerHTML = `<div class="vazio">${termo ? "Nenhum grupo encontrado." : "Nenhum grupo cadastrado."}</div>`;
     return;
   }
-  container.innerHTML = gruposAtuais
+  container.innerHTML = lista
     .map((g) => `<div class="item" data-id="${g.id}"><div class="info"><div class="nome">${esc(g.nome)}</div>${g.descricao ? `<div class="detalhe"><span>${esc(g.descricao)}</span></div>` : ""}</div></div>`)
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
@@ -1768,12 +1775,14 @@ async function excluirGrupoAtual() {
 
 /* ---------- cadastro: locais ---------- */
 function renderCadastroLocais() {
+  const termo = normalizarTexto(termoBuscaCadastro.locais);
+  const lista = termo ? locaisAtuais.filter((l) => normalizarTexto(l.nome).includes(termo)) : locaisAtuais;
   const container = $("#lista-cadastro-locais");
-  if (locaisAtuais.length === 0) {
-    container.innerHTML = `<div class="vazio">Nenhum local cadastrado.</div>`;
+  if (lista.length === 0) {
+    container.innerHTML = `<div class="vazio">${termo ? "Nenhum local encontrado." : "Nenhum local cadastrado."}</div>`;
     return;
   }
-  container.innerHTML = locaisAtuais
+  container.innerHTML = lista
     .map((l) => `<div class="item" data-id="${l.id}"><div class="info"><div class="nome">${l.site ? `<button type="button" class="btn-site-atalho" data-site="${esc(l.site)}" aria-label="Abrir site">${ICONE_SITE}</button>` : ""}${esc(l.nome)}</div>${l.cidade || l.endereco ? `<div class="detalhe"><span>${esc(l.endereco || "")}</span><span>${esc(l.cidade || "")}</span></div>` : ""}</div></div>`)
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
@@ -1950,12 +1959,14 @@ async function excluirLocalAtual() {
 
 /* ---------- cadastro: formas de pagamento ---------- */
 function renderCadastroFormas() {
+  const termo = normalizarTexto(termoBuscaCadastro.formas);
+  const lista = termo ? formasAtuais.filter((f) => normalizarTexto(f.nome).includes(termo)) : formasAtuais;
   const container = $("#lista-cadastro-formas");
-  if (formasAtuais.length === 0) {
-    container.innerHTML = `<div class="vazio">Nenhuma forma de pagamento cadastrada.</div>`;
+  if (lista.length === 0) {
+    container.innerHTML = `<div class="vazio">${termo ? "Nenhuma forma de pagamento encontrada." : "Nenhuma forma de pagamento cadastrada."}</div>`;
     return;
   }
-  container.innerHTML = formasAtuais.map((f) => `<div class="item" data-id="${f.id}"><div class="info"><div class="nome">${esc(f.nome)}</div></div></div>`).join("");
+  container.innerHTML = lista.map((f) => `<div class="item" data-id="${f.id}"><div class="info"><div class="nome">${esc(f.nome)}</div></div></div>`).join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarForma(formasAtuais.find((f) => f.id === el.dataset.id));
   });
@@ -2008,12 +2019,14 @@ async function excluirFormaAtual() {
 
 /* ---------- cadastro: unidades de medida ---------- */
 function renderCadastroUnidades() {
+  const termo = normalizarTexto(termoBuscaCadastro.unidades);
+  const lista = termo ? unidadesAtuais.filter((u) => normalizarTexto(u.nome).includes(termo)) : unidadesAtuais;
   const container = $("#lista-cadastro-unidades");
-  if (unidadesAtuais.length === 0) {
-    container.innerHTML = `<div class="vazio">Nenhuma unidade de medida cadastrada.</div>`;
+  if (lista.length === 0) {
+    container.innerHTML = `<div class="vazio">${termo ? "Nenhuma unidade encontrada." : "Nenhuma unidade de medida cadastrada."}</div>`;
     return;
   }
-  container.innerHTML = unidadesAtuais.map((u) => `<div class="item" data-id="${u.id}"><div class="info"><div class="nome">${esc(u.nome)}</div></div></div>`).join("");
+  container.innerHTML = lista.map((u) => `<div class="item" data-id="${u.id}"><div class="info"><div class="nome">${esc(u.nome)}</div></div></div>`).join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarUnidade(unidadesAtuais.find((u) => u.id === el.dataset.id));
   });
@@ -2383,6 +2396,29 @@ function observarSaudacao() {
   observador.observe(saudacao);
 }
 
+// Lupa flutuante das telas de cadastro: abre/fecha o campo de busca e filtra a lista em tempo
+// real a cada tecla digitada, sem precisar de um botão "buscar" separado.
+function ligarBuscaCadastro(chave, idFab, idWrap, idInput, renderizar) {
+  const fab = $(idFab), wrap = $(idWrap), input = $(idInput);
+  fab.onclick = () => {
+    const abrindo = wrap.classList.contains("hidden");
+    wrap.classList.toggle("hidden", !abrindo);
+    fab.classList.toggle("ativo", abrindo);
+    fab.textContent = abrindo ? "✕" : "🔍";
+    if (abrindo) {
+      input.focus();
+    } else {
+      input.value = "";
+      termoBuscaCadastro[chave] = "";
+      renderizar();
+    }
+  };
+  input.addEventListener("input", () => {
+    termoBuscaCadastro[chave] = input.value;
+    renderizar();
+  });
+}
+
 function ligarEventos() {
   $("#btn-entrar").onclick = entrar;
   $("#login-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") entrar(); });
@@ -2435,6 +2471,11 @@ function ligarEventos() {
   $("#fab-cadastro-locais").onclick = abrirFormNovoLocal;
   $("#fab-cadastro-formas").onclick = abrirFormNovaForma;
   $("#fab-cadastro-unidades").onclick = abrirFormNovaUnidade;
+  ligarBuscaCadastro("itens", "#fab-busca-itens", "#busca-itens-wrap", "#busca-itens", renderCadastroItens);
+  ligarBuscaCadastro("grupos", "#fab-busca-grupos", "#busca-grupos-wrap", "#busca-grupos", renderCadastroGrupos);
+  ligarBuscaCadastro("locais", "#fab-busca-locais", "#busca-locais-wrap", "#busca-locais", renderCadastroLocais);
+  ligarBuscaCadastro("formas", "#fab-busca-formas", "#busca-formas-wrap", "#busca-formas", renderCadastroFormas);
+  ligarBuscaCadastro("unidades", "#fab-busca-unidades", "#busca-unidades-wrap", "#busca-unidades", renderCadastroUnidades);
 
   $("#card-lista-proxima").onclick = () => {
     const id = $("#mini-carrossel-proxima").dataset.idSelecionado;

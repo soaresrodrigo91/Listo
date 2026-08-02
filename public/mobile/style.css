@@ -1458,6 +1458,36 @@ main::-webkit-scrollbar {
 .fab:active {
   transform: scale(0.95);
 }
+.fab.fab-busca {
+  right: 90px;
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+  font-weight: 400;
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--borda-glass);
+  box-shadow: 0 6px 16px var(--card-shadow-sm);
+}
+.fab.fab-busca.ativo {
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-color: var(--primary);
+}
+.busca-cadastro-wrap {
+  padding: 10px 16px 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.busca-cadastro-wrap input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+}
 #fab-inicio.aberto {
   transform: rotate(45deg);
 }
