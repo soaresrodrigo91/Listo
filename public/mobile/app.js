@@ -868,6 +868,34 @@ async function desfazerEstatisticasFinalizacao(itensDaLista) {
     locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
   }, { merge: true });
 }
+// Recalcula "itens/grupos/locais mais usados" (Configurações) do zero, direto do histórico de
+// preços atual — corrige qualquer resíduo deixado por exclusões antigas (antes do desconto
+// automático existir) sem depender de reconstruir o que já foi apagado.
+async function recalcularEstatisticasGerais() {
+  if (!confirm("Isso recalcula do zero as estatísticas de itens/grupos/locais mais usados, com base no histórico de preços atual. Continuar?")) return;
+  const btn = $("#btn-recalcular-estatisticas");
+  btn.disabled = true;
+  try {
+    const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
+    for (const item of itensAtuais) {
+      const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
+      const reais = snap.docs.map((d) => d.data()).filter((r) => !r.origemCadastro);
+      if (reais.length === 0) continue;
+      contagemItens[item.id] = reais.length;
+      const grupo = item.grupoNome || "Outros";
+      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + reais.length;
+      reais.forEach((r) => {
+        if (r.localId) contagemLocais[r.localId] = (contagemLocais[r.localId] || 0) + 1;
+      });
+    }
+    await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
+      itens: contagemItens, grupos: contagemGrupos, locais: contagemLocais,
+    });
+    exibirSucesso("Estatísticas recalculadas!");
+  } finally {
+    btn.disabled = false;
+  }
+}
 async function excluirListaAtual() {
   const id = $("#fn-id").value;
   if (!id) return;
@@ -2786,6 +2814,7 @@ function ligarEventos() {
   });
   $("#btn-confirmar-enviar-lista").onclick = confirmarEnvioParaLista;
   $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
+  $("#btn-recalcular-estatisticas").onclick = recalcularEstatisticasGerais;
 
   const chaveTema = $("#chave-tema-escuro");
   const temaEscuroSalvo = document.documentElement.getAttribute("data-tema") === "escuro";
