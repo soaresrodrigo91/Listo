@@ -1127,7 +1127,7 @@ function renderCadastroItens() {
   }
   container.innerHTML = lista
     .map((i) => {
-      const partes = [i.marca, i.descricaoUnidade].filter(Boolean);
+      const partes = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean);
       const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("");
       return `<div class="item" data-id="${i.id}">
       <div class="info">
