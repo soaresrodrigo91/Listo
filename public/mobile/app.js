@@ -163,7 +163,7 @@ let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
 let ultimoLocalUsadoId = null;
 let telaAnterior = "inicio";
-let filtroGrupoLista = null, filtroLocalLista = null, filtroGrupoItens = null;
+let filtroGrupoLista = null, filtroGrupoItens = null;
 let fracionavelUnidadeSelecionado = null;
 
 let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais = null,
@@ -641,6 +641,7 @@ function renderCarrosselProximaCompra(pendentes) {
     pontos.innerHTML = "";
     delete carrossel.dataset.idSelecionado;
     $("#dash-itens-pendentes").textContent = "0";
+    $("#card-lista-proxima").classList.remove("status-pendente", "status-parcial");
     return;
   }
 
@@ -655,6 +656,9 @@ function renderCarrosselProximaCompra(pendentes) {
     $("#dash-itens-pendentes").textContent = String(Math.max((lista.qtdItens || 0) - (lista.qtdComprados || 0), 0));
     pontos.querySelectorAll("span").forEach((s, i) => s.classList.toggle("ativo", i === idx));
     carrossel.dataset.idSelecionado = lista.id;
+    const status = lista.status || "pendente";
+    $("#card-lista-proxima").classList.toggle("status-pendente", status === "pendente");
+    $("#card-lista-proxima").classList.toggle("status-parcial", status === "parcial");
   }
 
   let timeoutScrollProxima = null;
@@ -722,7 +726,7 @@ function renderCarrosselListas() {
         </div>
         <div class="card-lista-resumo-itens">
           <span>✅ ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
-          <span>🔲 ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
+          <span>🔴 ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
         </div>
       </div>`;
     })
@@ -808,7 +812,6 @@ function abrirListaDetalhe(lista) {
   if (!lista) return;
   listaAbertaId = lista.id;
   filtroGrupoLista = null;
-  filtroLocalLista = null;
   ultimoLocalUsadoId = null;
   telaAnterior = "listas";
   if (unsubItensLista) unsubItensLista();
@@ -926,21 +929,18 @@ function renderListaDetalhe() {
   const gruposDaLista = [...new Set(itensListaAtuais.map((i) => i.grupoNome).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   renderChips("#filtros-lista-grupo", gruposDaLista, filtroGrupoLista, (v) => { filtroGrupoLista = v; renderListaDetalhe(); });
 
-  const locaisDaLista = [...new Set(itensListaAtuais.map((i) => i.localCompraId && (locaisAtuais.find((l) => l.id === i.localCompraId)?.nome)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  renderChips("#filtros-lista-local", locaisDaLista, filtroLocalLista, (v) => { filtroLocalLista = v; renderListaDetalhe(); });
-
   let itens = itensListaAtuais;
   if (filtroGrupoLista) itens = itens.filter((i) => i.grupoNome === filtroGrupoLista);
-  if (filtroLocalLista) itens = itens.filter((i) => locaisAtuais.find((l) => l.id === i.localCompraId)?.nome === filtroLocalLista);
 
   // Contagem e total no cabeçalho seguem o filtro atual: com "Todos" é a lista inteira,
-  // filtrando por grupo/local mostra só a fatia filtrada.
+  // filtrando por grupo só mostra essa fatia.
   const qtdComprados = itens.filter((i) => i.comprado).length;
+  const qtdPendentes = Math.max(itens.length - qtdComprados, 0);
   const valorTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   $("#lista-detalhe-cabecalho").innerHTML = `
     <div class="detalhe-titulo-credor"><span class="detalhe-nome-lista">${esc(lista.nome)}</span><span class="badge-status ${status}">${lista.permanente ? "Permanente" : rotuloStatus}</span></div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
-      <span>${qtdComprados}/${itens.length} itens</span>
+      <span>✅ ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · 🔴 ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
     </div>`;
 
@@ -1037,20 +1037,29 @@ function renderOpcoesValorProvisionado() {
   });
 }
 // Se nunca foi comprado (sem histórico), sempre fica em 0, independente da preferência.
-async function valorProvisionadoParaItem(item) {
+// Igual a valorProvisionadoParaItem, mas também informa de onde o valor veio (cadastro, último
+// comprado ou mais barato) e, quando vem de histórico, em qual local — usado no detalhe do item
+// pra deixar claro qual valor está sendo considerado e por quê.
+async function valorProvisionadoComOrigem(item) {
   const preferencia = preferenciaValorProvisionado();
-  if (preferencia === "cadastro") return item.valor || 0;
+  if (preferencia === "cadastro") return { valor: item.valor || 0, origem: "cadastro", localId: null };
   // "Último comprado"/"mais barato" só valem quando já existe histórico de fato; sem nenhuma
   // compra finalizada ainda, sempre cai no valor do cadastro (ou 0, se também não tiver).
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-  if (snap.empty) return item.valor || 0;
+  if (snap.empty) return { valor: item.valor || 0, origem: "cadastro", localId: null };
   const registros = snap.docs.map((d) => d.data());
   if (preferencia === "barato") {
-    const valores = registros.map((r) => r.valor || 0).filter((v) => v > 0);
-    return valores.length ? Math.min(...valores) : (item.valor || 0);
+    const comValor = registros.filter((r) => (r.valor || 0) > 0);
+    if (!comValor.length) return { valor: item.valor || 0, origem: "cadastro", localId: null };
+    const maisBarato = comValor.reduce((min, r) => (r.valor < min.valor ? r : min));
+    return { valor: maisBarato.valor, origem: "barato", localId: maisBarato.localId || null };
   }
   const maisRecente = registros.sort((a, b) => b.data.localeCompare(a.data))[0];
-  return maisRecente.valor || (item.valor || 0);
+  if (!maisRecente.valor) return { valor: item.valor || 0, origem: "cadastro", localId: null };
+  return { valor: maisRecente.valor, origem: "ultimo", localId: maisRecente.localId || null };
+}
+async function valorProvisionadoParaItem(item) {
+  return (await valorProvisionadoComOrigem(item)).valor;
 }
 
 // Avisa os demais membros do espaço compartilhado (nunca o próprio autor da ação) via o sino de notificações.
@@ -1265,7 +1274,7 @@ function renderChipsFiltroGrupo() {
 }
 function renderChipsFiltroLocal() { /* usado dentro de renderListaDetalhe */ }
 
-function renderCadastroItens() {
+async function renderCadastroItens() {
   renderChipsFiltroGrupo();
   let lista = itensAtuais;
   if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
@@ -1274,15 +1283,19 @@ function renderCadastroItens() {
     container.innerHTML = `<div class="vazio">Nenhum item cadastrado.</div>`;
     return;
   }
+  // Mesma regra de preferência (Configurações) usada ao adicionar o item numa lista: valor do
+  // cadastro, último valor comprado ou o mais barato — sem histórico, sempre cai no cadastro.
+  const valores = await Promise.all(lista.map((i) => valorProvisionadoParaItem(i)));
   container.innerHTML = lista
-    .map((i) => {
+    .map((i, idx) => {
       const partes = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean);
-      const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("");
+      const detalhe = partes.map((p, idx2) => `<span>${idx2 === 0 ? "" : "· "}${esc(p)}</span>`).join("");
       return `<div class="item" data-id="${i.id}">
       <div class="info">
         <div class="nome">${esc(i.nome)}</div>
         <div class="detalhe">${detalhe}</div>
       </div>
+      <span class="valor">${formatarMoeda(valores[idx])}</span>
       <button class="btn-enviar-lista" data-id-enviar="${i.id}" aria-label="Enviar para lista pendente" title="Enviar para lista pendente">🛒</button>
     </div>`;
     })
@@ -1381,6 +1394,14 @@ async function abrirItemDetalhe(item, origemTela) {
   itemCatalogoAbertoId = item.id;
   telaAnterior = origemTela || "cadastro-itens";
   $(".tab[data-tab='cadastro']").click();
+
+  const origemValor = await valorProvisionadoComOrigem(item);
+  const rotuloOrigemValor = OPCOES_VALOR_PROVISIONADO.find((o) => o.valor === origemValor.origem)?.rotulo || "";
+  const linhasValorConsiderado = [["Valor considerado", `${formatarMoeda(origemValor.valor)} (${rotuloOrigemValor})`]];
+  if (origemValor.localId) {
+    linhasValorConsiderado.push(["Comprado em", locaisAtuais.find((l) => l.id === origemValor.localId)?.nome || "—"]);
+  }
+
   $("#item-detalhe-info").innerHTML =
     [
       ["Nome", item.nome],
@@ -1388,6 +1409,7 @@ async function abrirItemDetalhe(item, origemTela) {
       ["Descrição", item.descricao || "—"],
       ["Descrição da unidade", item.descricaoUnidade || "—"],
       ["Valor", item.valor ? formatarMoeda(item.valor) : "—"],
+      ...linhasValorConsiderado,
       ["Grupo", item.grupoNome || "—"],
       ["Unidade", item.unidade],
     ].map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
