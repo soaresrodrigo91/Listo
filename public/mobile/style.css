@@ -1465,6 +1465,19 @@ main::-webkit-scrollbar {
   font-size: 12px;
   flex-shrink: 0;
 }
+.autocomplete-novo-item .nome {
+  color: var(--muted);
+  flex-shrink: 0;
+  overflow: visible;
+}
+.autocomplete-novo-item .valor {
+  color: var(--primary);
+  flex: 1;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .tabs {
   display: flex;

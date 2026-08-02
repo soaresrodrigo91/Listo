@@ -630,9 +630,22 @@ async function renderSugestoesItemLista(query) {
   const termo = query.trim().toLowerCase();
   const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => i.nome.toLowerCase().includes(termo)).slice(0, 6);
 
-  if (encontrados.length === 0) {
+  if (termo.length === 0) {
     container.classList.add("hidden");
     container.innerHTML = "";
+    return;
+  }
+  // Digitou algo e não achou nada no catálogo: atalho pra cadastrar o item na hora, em vez de
+  // ter que desistir da lista, ir em Cadastros > Itens e voltar depois.
+  if (encontrados.length === 0) {
+    container.innerHTML = `<div class="autocomplete-item autocomplete-novo-item" id="ld-cadastrar-novo-item"><span class="nome">Item não encontrado</span><span class="valor">+ Cadastrar "${esc(query.trim())}"</span></div>`;
+    container.classList.remove("hidden");
+    $("#ld-cadastrar-novo-item").onclick = () => {
+      container.classList.add("hidden");
+      container.innerHTML = "";
+      abrirFormNovoItem();
+      $("#fi-nome").value = query.trim();
+    };
     return;
   }
   const meuToken = ++tokenSugestoesItemLista;
