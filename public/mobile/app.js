@@ -141,10 +141,15 @@ function nomeExibicaoUsuario() {
 // Máscara de moeda "cifrão + centavos deslizantes": cada dígito digitado empurra os centavos,
 // sempre reconstruindo a partir dos dígitos brutos (evita o cursor entrar em estados inválidos).
 function ligarMascaraMoeda(seletor) {
-  $(seletor).addEventListener("input", (e) => {
+  const input = $(seletor);
+  input.addEventListener("input", (e) => {
     const digitos = e.target.value.replace(/\D/g, "");
     e.target.value = digitos ? formatarMoeda(Number(digitos) / 100) : "";
   });
+  // Campo às vezes vem pré-preenchido (valor provisionado, valor do cadastro ao editar item) —
+  // sem selecionar tudo ao focar, digitar por cima só empurra os centavos junto com os dígitos
+  // antigos em vez de substituir, resultando num valor errado misturando os dois.
+  input.addEventListener("focus", () => input.select());
 }
 // Campos <input type="number"> de quantidade: o navegador já bloqueia letras, mas ainda deixa
 // digitar "e"/"+"/"-" (notação científica/sinal) — bloqueia essas teclas também.
@@ -649,7 +654,9 @@ function renderSugestoesItemLista(query) {
 
 /* ---------- dashboard (Início) ---------- */
 function renderDashboard() {
-  const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
+  // "Pendente" aqui é "ainda não finalizada" (finalizadaEm), não "status comprada" — uma lista
+  // com todos os itens já marcados, mas ainda sem finalizar, continua editável normalmente.
+  const pendentes = listasAtuais.filter((l) => !l.finalizadaEm);
   const valorProvisionado = pendentes.reduce((s, l) => s + (l.valorProvisionadoTotal || 0), 0);
   $("#dash-valor-provisionado").textContent = formatarMoeda(valorProvisionado);
 
@@ -1246,6 +1253,15 @@ async function adicionarItemNaLista() {
     exibirSucesso(itensAtuais.length === 0 ? "Cadastre um item antes de adicionar à lista." : "Digite o nome e selecione um item da lista de sugestões.");
     return;
   }
+  // Não deixa duplicar o mesmo item na lista — se já estiver lá, manda direto pra edição de
+  // quantidade dele em vez de criar uma segunda linha do mesmo produto.
+  const jaNaLista = itensListaAtuais.find((i) => i.itemId === itemId);
+  if (jaNaLista) {
+    fecharFormAdicionarItem();
+    exibirSucesso(`"${item.nome}" já está nesta lista — altere a quantidade em vez de adicionar de novo.`);
+    abrirModalQuantidade(jaNaLista.id);
+    return;
+  }
   // Campo nativo type="number": .value já vem com ponto decimal (não vírgula), então lê direto
   // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
   let quantidade = Number($("#ld-quantidade").value) || 1;
@@ -1537,7 +1553,7 @@ async function abrirPickerEnviarLista(item) {
   $("#btn-confirmar-enviar-lista").classList.add("hidden");
   // Mais recente primeiro na ordem de exibição não importa aqui — só precisamos saber qual é a
   // última criada, pra vir pré-selecionada quando houver mais de uma disponível.
-  const pendentes = [...listasAtuais.filter((l) => l.status !== "comprada" || l.permanente)]
+  const pendentes = [...listasAtuais.filter((l) => !l.finalizadaEm)]
     .sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   const container = $("#lista-opcoes-enviar");
   mostrarMsg("#msg-enviar-lista", "", "");
