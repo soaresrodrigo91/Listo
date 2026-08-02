@@ -1530,7 +1530,8 @@ main::-webkit-scrollbar {
 .chave.ligada .chave-bolinha {
   transform: translateX(16px);
 }
-.opcao-valor-prov {
+.opcao-valor-prov,
+.opcao-fracionavel-unidade {
   cursor: pointer;
 }
 .radio-marca {

@@ -47,8 +47,50 @@ function paraNumero(texto) {
 // Unidades "de peso/volume" aceitam quantidade fracionada (ex: 400,50g); as demais (Unidade,
 // Caixa, Dúzia, Pacote...) são sempre contáveis em números inteiros.
 const UNIDADES_FRACIONAVEIS = new Set(["grama", "gramas", "g", "kg", "quilo", "quilos", "quilograma", "quilogramas", "ml", "mililitro", "mililitros", "litro", "litros", "l"]);
+// Prioriza o campo "fracionavel" cadastrado na própria unidade de medida (obrigatório para
+// unidades novas); cai no heurístico por nome só pra unidades antigas, criadas antes desse campo existir.
 function unidadeAceitaFracao(nomeUnidade) {
+  const unidade = (unidadesAtuais || []).find((u) => u.nome === nomeUnidade);
+  if (unidade && typeof unidade.fracionavel === "boolean") return unidade.fracionavel;
   return UNIDADES_FRACIONAVEIS.has((nomeUnidade || "").trim().toLowerCase());
+}
+// Ajusta um campo de quantidade pra unidade atual: guarda a unidade no dataset (lido pelo
+// sanitizador de digitação abaixo), troca o teclado numérico do celular e o step do spinner.
+function configurarCampoQuantidade(input, nomeUnidade) {
+  const fracionavel = unidadeAceitaFracao(nomeUnidade);
+  input.dataset.unidade = nomeUnidade || "";
+  input.step = fracionavel ? "0.01" : "1";
+  input.inputMode = fracionavel ? "decimal" : "numeric";
+}
+// Bloqueia "." e "," digitados (ou colados) quando a unidade atual do campo não é fracionável —
+// o atributo step sozinho não impede digitação de decimais, só afeta o spinner nativo.
+function bloquearDecimalSeNaoFracionavel(seletor) {
+  $(seletor).addEventListener("input", (e) => {
+    if (unidadeAceitaFracao(e.target.dataset.unidade)) return;
+    const limpo = e.target.value.replace(/[.,]/g, "");
+    if (limpo !== e.target.value) e.target.value = limpo;
+  });
+}
+// Escolha obrigatória (nunca vem pré-marcada num cadastro novo) de "sim"/"nao" pro campo
+// fracionavel da unidade de medida — mesmo padrão de seleção única usado em Configurações.
+const OPCOES_FRACIONAVEL_UNIDADE = [
+  { valor: "nao", rotulo: "Não — quantidade sempre inteira (ex: Unidade, Caixa, Dúzia)" },
+  { valor: "sim", rotulo: "Sim — aceita decimais (ex: Kg, Litro, Gramas)" },
+];
+function renderOpcoesFracionavelUnidade() {
+  const container = $("#opcoes-fracionavel-unidade");
+  container.innerHTML = OPCOES_FRACIONAVEL_UNIDADE
+    .map((o) => `<div class="detalhe-linha opcao-fracionavel-unidade" data-valor="${o.valor}">
+      <span class="rotulo">${esc(o.rotulo)}</span>
+      <span class="radio-marca ${o.valor === fracionavelUnidadeSelecionado ? "selecionado" : ""}"></span>
+    </div>`)
+    .join("");
+  container.querySelectorAll(".opcao-fracionavel-unidade").forEach((el) => {
+    el.onclick = () => {
+      fracionavelUnidadeSelecionado = el.dataset.valor;
+      renderOpcoesFracionavelUnidade();
+    };
+  });
 }
 function esc(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -91,8 +133,13 @@ const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center P�
   .map((nome) => ({ nome, endereco: null, cidade: null }));
 const FORMAS_PADRAO = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Flash"]
   .map((nome) => ({ nome }));
-const UNIDADES_PADRAO = ["Bandeja", "Caixa", "Dúzia", "Fardo", "Frasco", "Garrafa", "Gramas", "Kg", "Lata", "ml", "Rolo", "Saco", "Unidade"]
-  .map((nome) => ({ nome }));
+const UNIDADES_PADRAO = [
+  { nome: "Bandeja", fracionavel: false }, { nome: "Caixa", fracionavel: false }, { nome: "Dúzia", fracionavel: false },
+  { nome: "Fardo", fracionavel: false }, { nome: "Frasco", fracionavel: false }, { nome: "Garrafa", fracionavel: false },
+  { nome: "Gramas", fracionavel: true }, { nome: "Kg", fracionavel: true }, { nome: "Lata", fracionavel: false },
+  { nome: "ml", fracionavel: true }, { nome: "Rolo", fracionavel: false }, { nome: "Saco", fracionavel: false },
+  { nome: "Unidade", fracionavel: false },
+];
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
 
@@ -117,6 +164,7 @@ let itemListaPendenteId = null;
 let ultimoLocalUsadoId = null;
 let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroLocalLista = null, filtroGrupoItens = null;
+let fracionavelUnidadeSelecionado = null;
 
 let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais = null,
   unsubFormas = null, unsubUnidades = null, unsubItens = null, unsubListas = null, unsubItensLista = null, unsubConvites = null,
@@ -542,7 +590,7 @@ function renderSugestoesItemLista(query) {
       $("#ld-item-nome").value = item.nome;
       $("#ld-item-id").value = item.id;
       $("#ld-unidade").value = item.unidade || "";
-      $("#ld-quantidade").step = unidadeAceitaFracao(item.unidade) ? "0.01" : "1";
+      configurarCampoQuantidade($("#ld-quantidade"), item.unidade);
       container.classList.add("hidden");
       container.innerHTML = "";
     };
@@ -905,15 +953,17 @@ function renderOpcoesValorProvisionado() {
 async function valorProvisionadoParaItem(item) {
   const preferencia = preferenciaValorProvisionado();
   if (preferencia === "cadastro") return item.valor || 0;
+  // "Último comprado"/"mais barato" só valem quando já existe histórico de fato; sem nenhuma
+  // compra finalizada ainda, sempre cai no valor do cadastro (ou 0, se também não tiver).
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-  if (snap.empty) return 0;
+  if (snap.empty) return item.valor || 0;
   const registros = snap.docs.map((d) => d.data());
   if (preferencia === "barato") {
     const valores = registros.map((r) => r.valor || 0).filter((v) => v > 0);
-    return valores.length ? Math.min(...valores) : 0;
+    return valores.length ? Math.min(...valores) : (item.valor || 0);
   }
   const maisRecente = registros.sort((a, b) => b.data.localeCompare(a.data))[0];
-  return maisRecente.valor || 0;
+  return maisRecente.valor || (item.valor || 0);
 }
 
 // Avisa os demais membros do espaço compartilhado (nunca o próprio autor da ação) via o sino de notificações.
@@ -935,6 +985,7 @@ function fecharFormAdicionarItem() {
   $("#ld-item-id").value = "";
   $("#ld-unidade").value = "";
   $("#ld-quantidade").value = "1";
+  configurarCampoQuantidade($("#ld-quantidade"), "");
   $("#ld-item-sugestoes").classList.add("hidden");
   $("#form-adicionar-item").classList.add("hidden");
   $("#btn-abrir-form-add-item").classList.remove("hidden");
@@ -985,8 +1036,7 @@ function abrirModalQuantidade(itemListaId) {
   if (!item) return;
   itemListaPendenteId = itemListaId;
   $("#qtd-valor").value = item.quantidade;
-  const fracionavel = unidadeAceitaFracao(item.unidade);
-  $("#qtd-valor").step = fracionavel ? "0.01" : "1";
+  configurarCampoQuantidade($("#qtd-valor"), item.unidade);
   $("#qtd-label").textContent = `Quantidade${item.unidade ? ` (${item.unidade})` : ""} *`;
   mostrarMsg("#msg-quantidade", "", "");
   $("#overlay-quantidade").classList.remove("hidden");
@@ -1168,7 +1218,7 @@ async function abrirPickerEnviarLista(item) {
   if (!item) return;
   $("#titulo-enviar-lista").textContent = `Enviar "${item.nome}" para qual lista?`;
   $("#env-quantidade").value = "1";
-  $("#env-quantidade").step = unidadeAceitaFracao(item.unidade) ? "0.01" : "1";
+  configurarCampoQuantidade($("#env-quantidade"), item.unidade);
   const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
   const container = $("#lista-opcoes-enviar");
   mostrarMsg("#msg-enviar-lista", "", "");
@@ -1753,6 +1803,8 @@ function abrirFormNovaUnidade() {
   telaAnterior = "cadastro-unidades";
   $("#fu-id").value = "";
   $("#fu-nome").value = "";
+  fracionavelUnidadeSelecionado = null;
+  renderOpcoesFracionavelUnidade();
   $("#btn-excluir-unidade").classList.add("hidden");
   mostrarMsg("#msg-form-unidade", "", "");
   mostrarTelaCheia("form-unidade", "Nova unidade de medida");
@@ -1761,6 +1813,10 @@ function abrirFormEditarUnidade(unidade) {
   telaAnterior = "cadastro-unidades";
   $("#fu-id").value = unidade.id;
   $("#fu-nome").value = unidade.nome;
+  // Unidade antiga sem o campo cadastrado: pré-preenche com o heurístico por nome, mas
+  // ainda assim grava um valor explícito da próxima vez que for salva.
+  fracionavelUnidadeSelecionado = unidadeAceitaFracao(unidade.nome) ? "sim" : "nao";
+  renderOpcoesFracionavelUnidade();
   $("#btn-excluir-unidade").classList.remove("hidden");
   mostrarMsg("#msg-form-unidade", "", "");
   mostrarTelaCheia("form-unidade", "Editar unidade de medida");
@@ -1772,10 +1828,15 @@ async function salvarUnidade() {
     mostrarMsg("#msg-form-unidade", "Informe o nome da unidade de medida.", "erro");
     return;
   }
+  if (!fracionavelUnidadeSelecionado) {
+    mostrarMsg("#msg-form-unidade", "Selecione se a unidade aceita quantidade fracionada.", "erro");
+    return;
+  }
+  const dados = { nome, fracionavel: fracionavelUnidadeSelecionado === "sim" };
   if (id) {
-    await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), { nome });
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), dados);
   } else {
-    await addDoc(collection(bd, "espacos", espacoIdAtual, "unidadesMedida"), { nome });
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "unidadesMedida"), dados);
     notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou a unidade de medida "${nome}".`);
   }
   exibirSucesso("Unidade de medida salva!");
@@ -2265,6 +2326,7 @@ function ligarEventos() {
 
   ["#mc-valor", "#fi-valor"].forEach(ligarMascaraMoeda);
   ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
+  ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
   renderOpcoesValorProvisionado();
 
   $("#btn-onboarding-proximo").onclick = () => {
