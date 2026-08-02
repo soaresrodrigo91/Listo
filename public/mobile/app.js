@@ -656,6 +656,13 @@ function preencherSelectFormaPagamento() {
 // a consulta do valor provisionado é assíncrona (histórico de preços), então pode chegar fora
 // de ordem se a pessoa digitar rápido.
 let tokenSugestoesItemLista = 0;
+// Valor por unidade do item selecionado no formulário de adicionar item na lista — junto com a
+// quantidade, dá o valor provisionado mostrado no campo "Valor" (recalculado a cada mudança).
+let valorUnitarioAdicionarItem = 0;
+function atualizarValorAdicionarItem() {
+  const quantidade = Number($("#ld-quantidade").value) || 0;
+  $("#ld-valor-provisionado").value = formatarMoeda(valorUnitarioAdicionarItem * quantidade);
+}
 async function renderSugestoesItemLista(query) {
   const container = $("#ld-item-sugestoes");
   const termo = query.trim().toLowerCase();
@@ -699,6 +706,8 @@ async function renderSugestoesItemLista(query) {
       $("#ld-item-id").value = item.id;
       $("#ld-unidade").value = item.unidade || "";
       configurarCampoQuantidade($("#ld-quantidade"), item.unidade);
+      valorUnitarioAdicionarItem = valores[encontrados.indexOf(item)];
+      atualizarValorAdicionarItem();
       container.classList.add("hidden");
       container.innerHTML = "";
     };
@@ -1290,6 +1299,8 @@ function fecharFormAdicionarItem() {
   $("#ld-unidade").value = "";
   $("#ld-quantidade").value = "1";
   configurarCampoQuantidade($("#ld-quantidade"), "");
+  valorUnitarioAdicionarItem = 0;
+  $("#ld-valor-provisionado").value = "";
   $("#ld-item-sugestoes").classList.add("hidden");
   $("#form-adicionar-item").classList.add("hidden");
   $("#btn-abrir-form-add-item").classList.remove("hidden");
@@ -2785,9 +2796,12 @@ function ligarEventos() {
 
   $("#ld-item-nome").addEventListener("input", (e) => {
     $("#ld-item-id").value = "";
+    valorUnitarioAdicionarItem = 0;
+    $("#ld-valor-provisionado").value = "";
     renderSugestoesItemLista(e.target.value);
   });
   $("#ld-item-nome").addEventListener("blur", () => setTimeout(() => $("#ld-item-sugestoes").classList.add("hidden"), 150));
+  $("#ld-quantidade").addEventListener("input", atualizarValorAdicionarItem);
   $("#btn-adicionar-item-lista").onclick = adicionarItemNaLista;
   $("#btn-cancelar-add-item-lista").onclick = fecharFormAdicionarItem;
   $("#btn-abrir-form-add-item").onclick = () => {
