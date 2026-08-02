@@ -891,7 +891,10 @@ async function recalcularEstatisticasGerais() {
     for (const item of itensAtuais) {
       const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
       const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const orfaos = todos.filter((r) => !r.origemCadastro && r.listaId && !idsListasExistentes.has(r.listaId));
+      // Sem o "r.listaId &&" de antes: registro real sem listaId nenhum (resíduo bem antigo,
+      // de antes desse campo existir) também conta como órfão, não só o que aponta pra um id
+      // que não existe mais.
+      const orfaos = todos.filter((r) => !r.origemCadastro && !idsListasExistentes.has(r.listaId));
       await Promise.all(orfaos.map((r) => deleteDoc(doc(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos", r.id))));
       const idsOrfaos = new Set(orfaos.map((r) => r.id));
       const reais = todos.filter((r) => !r.origemCadastro && !idsOrfaos.has(r.id));
@@ -906,6 +909,10 @@ async function recalcularEstatisticasGerais() {
     await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
       itens: contagemItens, grupos: contagemGrupos, locais: contagemLocais,
     });
+    // estatisticas/geral não tem listener ao vivo (só é lido quando o dashboard renderiza) —
+    // sem isso, a tela Início continuaria mostrando os números antigos até navegar pra outro
+    // lugar e voltar.
+    renderDashboard();
     exibirSucesso("Estatísticas recalculadas!");
   } finally {
     btn.disabled = false;
