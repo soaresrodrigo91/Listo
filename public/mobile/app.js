@@ -1038,13 +1038,9 @@ async function confirmarCompra() {
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     comprado: true, localCompraId: localId, valorPago, compradoPor: usuario.uid, compradoEm: hojeISO(),
   });
-  // Histórico de preços só é gravado na finalização da compra (confirmarFinalizar), não aqui:
-  // até lá o check é só o estado "peguei no carrinho", podendo ser desmarcado sem deixar rastro.
-  await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-    itens: { [item.itemId]: increment(1) },
-    grupos: { [item.grupoNome || "Outros"]: increment(1) },
-    locais: { [localId]: increment(1) },
-  }, { merge: true });
+  // Histórico de preços e estatísticas dos dashboards só são gravados na finalização da compra
+  // (confirmarFinalizar), não aqui: até lá o check é só o estado "peguei no carrinho", podendo
+  // ser desmarcado sem deixar rastro nem inflar "itens/grupos/locais mais usados" à toa.
   await recalcularTotaisLista();
   fecharModalComprar();
   exibirSucesso("Item marcado como comprado!");
@@ -1101,6 +1097,22 @@ async function confirmarFinalizar() {
   await Promise.all(comprados.map((i) => addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
     localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
   })));
+  // Estatísticas dos dashboards (itens/grupos/locais mais usados) contam só o que foi de fato
+  // finalizado — soma as ocorrências por chave e grava um único increment por chave.
+  if (comprados.length > 0) {
+    const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
+    comprados.forEach((i) => {
+      contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) + 1;
+      const grupo = i.grupoNome || "Outros";
+      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + 1;
+      contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) + 1;
+    });
+    await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
+      itens: Object.fromEntries(Object.entries(contagemItens).map(([k, v]) => [k, increment(v)])),
+      grupos: Object.fromEntries(Object.entries(contagemGrupos).map(([k, v]) => [k, increment(v)])),
+      locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
+    }, { merge: true });
+  }
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
     finalizadaEm: serverTimestamp(), formaPagamentoId: formaId, parcelas, valorTotalPago,
   });
