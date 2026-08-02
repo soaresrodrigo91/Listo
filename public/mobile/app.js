@@ -57,6 +57,9 @@ function formatarTelefone(valor) {
 function normalizarEmail(email) {
   return (email || "").trim().toLowerCase();
 }
+function nomeExibicaoUsuario() {
+  return `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
+}
 // Máscara de moeda "cifrão + centavos deslizantes": cada dígito digitado empurra os centavos,
 // sempre reconstruindo a partir dos dígitos brutos (evita o cursor entrar em estados inválidos).
 function ligarMascaraMoeda(seletor) {
@@ -116,7 +119,6 @@ let unsubUsuario = null, unsubEspacoDoc = null, unsubGrupos = null, unsubLocais 
 /* ---------- inicialização ---------- */
 window.addEventListener("DOMContentLoaded", () => {
   ligarEventos();
-  observarSaudacao();
 
   // Sem credenciais do Firebase ainda (FIREBASE_CONFIG vazio): mostra a tela de login para
   // conferência visual do layout, mas sem tentar autenticar de verdade.
@@ -143,6 +145,9 @@ window.addEventListener("DOMContentLoaded", () => {
       $("#tela-cadastro").classList.add("hidden");
       $("#app").classList.remove("hidden");
       irParaTela("inicio");
+      // Só agora o #app deixa de ter display:none — criar o observer antes disso faz o root
+      // (main) ter tamanho zero e o efeito de sumir a saudação ao rolar nunca dispara.
+      observarSaudacao();
       abrirOnboardingSeNecessario();
     } else {
       usuario = null;
@@ -159,9 +164,6 @@ window.addEventListener("DOMContentLoaded", () => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/mobile/sw.js").catch(() => {});
   }
-
-  ligarEventos();
-  observarSaudacao();
 });
 
 /* ---------- login / cadastro ---------- */
@@ -700,6 +702,7 @@ async function salvarLista() {
         criadoPor: usuario.uid, criadoEm: serverTimestamp(),
         finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
       });
+      notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou a lista "${nome}".`);
     }
     exibirSucesso("Lista salva com sucesso!");
     irParaTela("listas");
@@ -901,7 +904,7 @@ async function adicionarItemNaLista() {
   // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
   const quantidade = Number($("#ld-quantidade").value) || 1;
   const valorProvisionado = await ultimoValorConhecido(itemId);
-  const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
+  const adicionadoPorNome = nomeExibicaoUsuario();
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
     itemId, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
     quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
@@ -1091,6 +1094,7 @@ function renderCadastroItens() {
 async function abrirPickerEnviarLista(item) {
   if (!item) return;
   $("#titulo-enviar-lista").textContent = `Enviar "${item.nome}" para qual lista?`;
+  $("#env-quantidade").value = "1";
   const pendentes = listasAtuais.filter((l) => l.status !== "comprada" || l.permanente);
   const container = $("#lista-opcoes-enviar");
   mostrarMsg("#msg-enviar-lista", "", "");
@@ -1126,11 +1130,12 @@ async function enviarItemParaLista(item, listaId) {
     mostrarMsg("#msg-enviar-lista", `${item.nome} já está na lista "${nomeLista}".`, "erro");
     return;
   }
-  const adicionadoPorNome = `${perfilAtual.nome} ${perfilAtual.sobrenome}`.trim() || usuario.email;
+  const quantidade = Number($("#env-quantidade").value) || 1;
+  const adicionadoPorNome = nomeExibicaoUsuario();
   const valorProvisionado = await ultimoValorConhecido(item.id);
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
     itemId: item.id, nome: item.nome, unidade: item.unidade, grupoNome: item.grupoNome || null,
-    quantidade: 1, valorProvisionado, subtotal: valorProvisionado,
+    quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
@@ -1344,8 +1349,12 @@ async function salvarItem() {
   };
   $("#btn-salvar-item").disabled = true;
   try {
-    if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
-    else await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
+    if (id) {
+      await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
+    } else {
+      await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
+      notificarMembrosEspaco(`${nomeExibicaoUsuario()} cadastrou o item "${nome}".`);
+    }
     exibirSucesso("Item salvo com sucesso!");
     irParaTela("cadastro-itens");
   } catch {
@@ -1400,8 +1409,12 @@ async function salvarGrupo() {
     return;
   }
   const dados = { nome, descricao: $("#fg-descricao").value.trim() || null };
-  if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "grupos", id), dados);
-  else await addDoc(collection(bd, "espacos", espacoIdAtual, "grupos"), dados);
+  if (id) {
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "grupos", id), dados);
+  } else {
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "grupos"), dados);
+    notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou o grupo "${nome}".`);
+  }
   exibirSucesso("Grupo salvo com sucesso!");
   irParaTela("cadastro-grupos");
 }
@@ -1561,8 +1574,12 @@ async function salvarLocal() {
   let site = $("#fl-site").value.trim() || null;
   if (site && !/^https?:\/\//i.test(site)) site = `https://${site}`;
   const dados = { nome, endereco: $("#fl-endereco").value.trim() || null, cidade: $("#fl-cidade").value.trim() || null, site };
-  if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "locais", id), dados);
-  else await addDoc(collection(bd, "espacos", espacoIdAtual, "locais"), dados);
+  if (id) {
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "locais", id), dados);
+  } else {
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "locais"), dados);
+    notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou o local "${nome}".`);
+  }
   exibirSucesso("Local salvo com sucesso!");
   irParaTela("cadastro-locais");
 }
@@ -1621,8 +1638,12 @@ async function salvarForma() {
     mostrarMsg("#msg-form-forma", "Informe o nome da forma de pagamento.", "erro");
     return;
   }
-  if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "formasPagamento", id), { nome });
-  else await addDoc(collection(bd, "espacos", espacoIdAtual, "formasPagamento"), { nome });
+  if (id) {
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "formasPagamento", id), { nome });
+  } else {
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "formasPagamento"), { nome });
+    notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou a forma de pagamento "${nome}".`);
+  }
   exibirSucesso("Forma de pagamento salva!");
   irParaTela("cadastro-formas");
 }
@@ -1673,8 +1694,12 @@ async function salvarUnidade() {
     mostrarMsg("#msg-form-unidade", "Informe o nome da unidade de medida.", "erro");
     return;
   }
-  if (id) await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), { nome });
-  else await addDoc(collection(bd, "espacos", espacoIdAtual, "unidadesMedida"), { nome });
+  if (id) {
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), { nome });
+  } else {
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "unidadesMedida"), { nome });
+    notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou a unidade de medida "${nome}".`);
+  }
   exibirSucesso("Unidade de medida salva!");
   irParaTela("cadastro-unidades");
 }
@@ -1857,7 +1882,7 @@ const TODAS_AS_TELAS = [...TELAS_PRINCIPAIS, ...TELAS_CHEIAS];
 const TITULOS_TELA_PRINCIPAL = {
   inicio: "Início", listas: "Listas de Compras", "cadastro-itens": "Itens", "cadastro-grupos": "Grupos",
   "cadastro-locais": "Locais", "cadastro-formas": "Formas de Pagamento", "cadastro-unidades": "Unidades de Medida",
-  compartilhadas: "Listas Compartilhadas", configuracoes: "Configurações", seguranca: "Segurança",
+  compartilhadas: "Participantes", configuracoes: "Configurações", seguranca: "Segurança",
 };
 
 function irParaTela(nome) {
