@@ -1262,7 +1262,7 @@ async function adicionarItemNaLista() {
   const jaNaLista = itensListaAtuais.find((i) => i.itemId === itemId);
   if (jaNaLista) {
     fecharFormAdicionarItem();
-    exibirSucesso(`"${item.nome}" já está nesta lista — altere a quantidade em vez de adicionar de novo.`);
+    exibirSucesso(`"${item.nome}" já está nesta lista — altere a quantidade em vez de adicionar de novo.`, 3000);
     abrirModalQuantidade(jaNaLista.id);
     return;
   }
