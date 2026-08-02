@@ -1642,28 +1642,6 @@ async function itemTemCompraRegistrada(itemId) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", itemId, "historicoPrecos"));
   return snap.docs.some((d) => !d.data().origemCadastro);
 }
-// Migração manual (Configurações): itens cadastrados antes da linha-semente do cadastro existir
-// não têm esse registro ainda — roda uma vez só pra criar o que estiver faltando.
-async function gerarHistoricoCadastroItensAntigos() {
-  if (!confirm("Isso vai conferir todos os itens cadastrados e criar a linha de \"Valor do cadastro\" no histórico de quem ainda não tiver. Pode levar alguns segundos. Continuar?")) return;
-  const btn = $("#btn-gerar-historico-cadastro");
-  btn.disabled = true;
-  let criados = 0;
-  try {
-    for (const item of itensAtuais) {
-      const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-      if (snap.docs.some((d) => d.data().origemCadastro)) continue;
-      await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"), {
-        localId: null, valor: item.valor || 0, data: "2000-01-01", listaId: null, origemCadastro: true,
-      });
-      criados++;
-    }
-    exibirSucesso(criados > 0 ? `Histórico de cadastro criado para ${criados} ${criados === 1 ? "item" : "itens"}.` : "Todos os itens já tinham o histórico de cadastro.");
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 // Exibida na aba "Histórico de Preços" do item: reduzida a 1 linha por local (a mais
 // recente), mas o botão de excluir apaga TODOS os registros daquele item+local — senão o
 // registro mais antigo simplesmente reapareceria no lugar do que acabou de ser removido.
@@ -2808,7 +2786,6 @@ function ligarEventos() {
   });
   $("#btn-confirmar-enviar-lista").onclick = confirmarEnvioParaLista;
   $("#btn-cancelar-enviar-lista").onclick = fecharPickerEnviarLista;
-  $("#btn-gerar-historico-cadastro").onclick = gerarHistoricoCadastroItensAntigos;
 
   const chaveTema = $("#chave-tema-escuro");
   const temaEscuroSalvo = document.documentElement.getAttribute("data-tema") === "escuro";
@@ -2825,15 +2802,15 @@ function ligarEventos() {
   ["#mc-valor", "#fi-valor"].forEach(ligarMascaraMoeda);
   ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
   ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
-  // Botões "−"/"+" dos campos de quantidade: um passo por toque (o spinner nativo do
-  // type="number" some incrementos repetidos sozinho em telas de toque).
+  // Botões "−"/"+" dos campos de quantidade: sempre andam de 1 em 1 (mesmo em unidade
+  // fracionável, ex.: kg) — decimais só entram digitando manualmente no campo. Um passo por
+  // toque, sem o spinner nativo repetindo incrementos sozinho em telas de toque.
   document.querySelectorAll(".btn-stepper").forEach((btn) => {
     btn.onclick = () => {
       const input = $(`#${btn.dataset.alvo}`);
       if (!input) return;
-      const passo = Number(input.step) || 1;
       const minimo = input.min !== "" ? Number(input.min) : -Infinity;
-      let valor = Math.round(((Number(input.value) || 0) + passo * Number(btn.dataset.delta)) * 100) / 100;
+      let valor = Math.round(((Number(input.value) || 0) + Number(btn.dataset.delta)) * 100) / 100;
       if (valor < minimo) valor = minimo;
       input.value = valor;
       input.dispatchEvent(new Event("input", { bubbles: true }));

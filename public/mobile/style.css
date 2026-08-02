@@ -184,8 +184,18 @@ textarea {
 }
 /* A setinha nativa do type="number" fica sob medida no desktop, mas em touch costuma repetir
    incrementos sozinha com um único toque (bug conhecido do controle nativo em mobile) — por
-   isso appearance:none continua escondendo ela; o incremento/decremento vira os botões
-   .btn-stepper abaixo, que disparam um passo por toque, sem susto. */
+   isso ela some; o incremento/decremento vira os botões .btn-stepper abaixo, que disparam um
+   passo por toque, sem susto. appearance:none no input sozinho não é suficiente em todo
+   navegador/engine, por isso reforça escondendo os pseudo-elementos do Chrome/Safari e o
+   -moz-appearance do Firefox também. */
+.field input[type="number"]::-webkit-outer-spin-button,
+.field input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.field input[type="number"] {
+  -moz-appearance: textfield;
+}
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
