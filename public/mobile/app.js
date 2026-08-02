@@ -722,7 +722,7 @@ function renderCarrosselListas() {
           <span class="badge-status ${status}">${l.permanente ? "Permanente" : rotuloStatus}</span>
         </div>
         <div class="card-lista-rodape">
-          <span>${comprados}/${l.qtdItens || 0} itens</span>
+          <span>${l.qtdItens || 0} item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
           <span class="valor">${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
         </div>
         <div class="card-lista-resumo-itens">
