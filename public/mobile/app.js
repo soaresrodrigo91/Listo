@@ -111,6 +111,12 @@ function esc(s) {
 function normalizarTexto(s) {
   return (s || "").trim().toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
 }
+// Busca de item usada em todo o app (adicionar na lista, autocomplete do cadastro, lupa da tela
+// de Itens): considera nome E marca, ignora maiúscula/minúscula e acento, e acha em qualquer
+// posição do texto (não só no começo da palavra).
+function itemCombinaComBusca(item, termoNormalizado) {
+  return normalizarTexto(item.nome).includes(termoNormalizado) || normalizarTexto(item.marca).includes(termoNormalizado);
+}
 function encontrarNomeParecido(nome, lista) {
   const alvo = normalizarTexto(nome);
   if (!alvo) return null;
@@ -665,8 +671,8 @@ function atualizarValorAdicionarItem() {
 }
 async function renderSugestoesItemLista(query) {
   const container = $("#ld-item-sugestoes");
-  const termo = query.trim().toLowerCase();
-  const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => i.nome.toLowerCase().includes(termo)).slice(0, 6);
+  const termo = normalizarTexto(query);
+  const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => itemCombinaComBusca(i, termo)).slice(0, 6);
 
   if (termo.length === 0) {
     container.classList.add("hidden");
@@ -692,7 +698,14 @@ async function renderSugestoesItemLista(query) {
   const meuToken = ++tokenSugestoesItemLista;
   // Mesma regra de preferência (Configurações) usada ao adicionar o item de fato: valor do
   // cadastro, último comprado ou mais barato — sem histórico ainda, cai no valor do cadastro.
-  const valores = await Promise.all(encontrados.map((i) => valorProvisionadoParaItem(i)));
+  // Uma falha de rede aqui não pode travar a seleção do item: sem valor, mostra R$ 0,00 mas
+  // ainda deixa clicar e adicionar normalmente.
+  let valores;
+  try {
+    valores = await Promise.all(encontrados.map((i) => valorProvisionadoParaItem(i)));
+  } catch {
+    valores = encontrados.map(() => 0);
+  }
   if (meuToken !== tokenSugestoesItemLista) return;
   container.innerHTML = encontrados
     .map((i, idx) => {
@@ -1131,8 +1144,8 @@ function renderListaDetalhe() {
 
   // Contagem e total no cabeçalho seguem o filtro atual: com "Todos" é a lista inteira,
   // filtrando por grupo só mostra essa fatia.
-  const qtdComprados = itens.filter((i) => i.comprado).length;
-  const qtdPendentes = Math.max(itens.length - qtdComprados, 0);
+  const qtdComprados = somaQuantidades(itens.filter((i) => i.comprado));
+  const qtdPendentes = Math.max(somaQuantidades(itens) - qtdComprados, 0);
   const valorTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   $("#lista-detalhe-cabecalho").innerHTML = `
     <div class="detalhe-titulo-credor">
@@ -1152,7 +1165,7 @@ function renderListaDetalhe() {
 
   itens = [...itens].sort((a, b) => {
     if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
-    return (a.grupoNome || "").localeCompare(b.grupoNome || "") || a.nome.localeCompare(b.nome, "pt-BR");
+    return a.nome.localeCompare(b.nome, "pt-BR");
   });
 
   const espacoCompartilhado = (espacoAtual.membros || []).length > 1;
@@ -1337,30 +1350,40 @@ async function adicionarItemNaLista() {
   // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
   let quantidade = Number($("#ld-quantidade").value) || 1;
   if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
-  const valorProvisionado = await valorProvisionadoParaItem(item);
-  const adicionadoPorNome = nomeExibicaoUsuario();
-  await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
-    itemId, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
-    descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
-    quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
-    comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
-    adicionadoPor: usuario.uid, adicionadoPorNome,
-  });
-  recalcularTotaisLista();
-  const listaAtual = listaAbertaAtual();
-  notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${item.nome}" à lista "${listaAtual?.nome || ""}".`);
-  fecharFormAdicionarItem();
-  exibirSucesso("Item adicionado à lista!");
+  try {
+    const valorProvisionado = await valorProvisionadoParaItem(item);
+    const adicionadoPorNome = nomeExibicaoUsuario();
+    await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
+      itemId, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
+      descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
+      quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
+      comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
+      adicionadoPor: usuario.uid, adicionadoPorNome,
+    });
+    recalcularTotaisLista();
+    const listaAtual = listaAbertaAtual();
+    notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${item.nome}" à lista "${listaAtual?.nome || ""}".`);
+    fecharFormAdicionarItem();
+    exibirSucesso("Item adicionado à lista!");
+  } catch {
+    exibirSucesso("Não foi possível adicionar o item. Confira a conexão e tente de novo.", 3000);
+  }
 }
 
 // Busca os itens direto do servidor (getDocs) em vez de usar itensListaAtuais: logo após um
 // addDoc/updateDoc/deleteDoc, o listener onSnapshot pode ainda não ter atualizado o cache local,
 // e os totais ficariam errados se lêssemos o array em memória nesse instante.
+// Conta "quantidade de itens" pela quantidade de cada linha (arroz com quantidade 3 conta como
+// 3 itens, não como 1 linha) — senão a contagem fica menor do que a real. Cada linha conta pelo
+// menos 1, mesmo com quantidade fracionária pequena (ex.: 0,2kg não pode virar 0 no arredondamento.
+function somaQuantidades(itens) {
+  return itens.reduce((s, i) => s + Math.max(1, Math.round(i.quantidade || 1)), 0);
+}
 async function recalcularTotaisLista(listaId = listaAbertaId) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"));
   const itens = snap.docs.map((d) => d.data());
-  const qtdItens = itens.length;
-  const qtdComprados = itens.filter((i) => i.comprado).length;
+  const qtdItens = somaQuantidades(itens);
+  const qtdComprados = somaQuantidades(itens.filter((i) => i.comprado));
   const valorProvisionadoTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   const status = qtdComprados === 0 ? "pendente" : qtdComprados === qtdItens && qtdItens > 0 ? "comprada" : "parcial";
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaId), { qtdItens, qtdComprados, valorProvisionadoTotal, status });
@@ -1572,7 +1595,7 @@ async function renderCadastroItens() {
   let lista = itensAtuais;
   // Buscando, ignora o filtro de grupo selecionado — o item pesquisado pode estar em qualquer
   // grupo, e limitar à aba "Todos" implicitamente é mais previsível do que manter o recorte.
-  if (termo) lista = lista.filter((i) => normalizarTexto(i.nome).includes(termo));
+  if (termo) lista = lista.filter((i) => itemCombinaComBusca(i, termo));
   else if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
   $("#total-itens").textContent = `${lista.length} Item${lista.length === 1 ? "" : "s"}`;
   const container = $("#lista-cadastro-itens");
@@ -1723,10 +1746,8 @@ async function abrirItemDetalhe(item, origemTela) {
   // "Valor" já sai dinâmico direto — conforme a preferência (Configurações) e o histórico de
   // preços atualizado a cada compra, em vez de mostrar sempre o número fixo do cadastro.
   const origemValor = await valorProvisionadoComOrigem(item);
-  const rotuloOrigemValor = OPCOES_VALOR_PROVISIONADO.find((o) => o.valor === origemValor.origem)?.rotulo || "";
   const linhasValorConsiderado = [
     ["Valor", formatarMoeda(origemValor.valor)],
-    ["Configuração para valor", rotuloOrigemValor],
   ];
   if (origemValor.localId) {
     linhasValorConsiderado.push(["Comprado em", locaisAtuais.find((l) => l.id === origemValor.localId)?.nome || "—"]);
@@ -1862,11 +1883,11 @@ function renderSugestoesUnidade(query) {
 // o mesmo produto no catálogo. Clicar numa sugestão abre o item existente para editar.
 function renderSugestoesItem(query) {
   const container = $("#fi-nome-sugestoes");
-  const termo = query.trim().toLowerCase();
+  const termo = normalizarTexto(query);
   const idAtual = $("#fi-id").value;
   const encontrados = termo.length < 2
     ? []
-    : itensAtuais.filter((i) => i.id !== idAtual && i.nome.toLowerCase().includes(termo)).slice(0, 6);
+    : itensAtuais.filter((i) => i.id !== idAtual && itemCombinaComBusca(i, termo)).slice(0, 6);
 
   if (encontrados.length === 0) {
     container.classList.add("hidden");
