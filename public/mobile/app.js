@@ -1963,9 +1963,10 @@ async function salvarItem() {
   $("#btn-salvar-item").disabled = true;
   try {
     if (id) {
-      await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
-      // Enquanto não existir compra real, mantém a linha-semente do cadastro em dia com o valor
-      // editado — assim que a 1ª compra acontecer, o campo trava e essa linha para de mudar.
+      // Sincroniza a linha-semente do cadastro ANTES de gravar o item: o onSnapshot da coleção
+      // "itens" dispara assim que o updateDoc abaixo acontece, e se a semente ainda não tivesse
+      // sido atualizada nesse momento, a tela de Itens (que segue a preferência "último comprado")
+      // renderizaria com o valor antigo do histórico.
       if (!(await itemTemCompraRegistrada(id))) {
         const snapHist = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos"));
         const semente = snapHist.docs.find((d) => d.data().origemCadastro);
@@ -1977,6 +1978,7 @@ async function salvarItem() {
           });
         }
       }
+      await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
     } else {
       const refItem = await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
       await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", refItem.id, "historicoPrecos"), {
