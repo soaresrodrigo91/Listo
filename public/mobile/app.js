@@ -683,6 +683,9 @@ async function renderSugestoesItemLista(query) {
       container.innerHTML = "";
       abrirFormNovoItem();
       $("#fi-nome").value = query.trim();
+      // Veio do atalho dentro da lista — ao salvar (ou cancelar), volta pra essa lista em vez de
+      // ir pra tela de cadastro de itens.
+      telaAnterior = "lista-detalhe";
     };
     return;
   }
@@ -1005,6 +1008,14 @@ function abrirListaDetalhe(lista) {
 
 function listaAbertaAtual() {
   return listasAtuais.find((l) => l.id === listaAbertaId);
+}
+// "lista-detalhe" não é uma tela principal (irParaTela não sabe reabri-la com o título e os
+// dados certos) — quando um formulário foi aberto de dentro de uma lista (voltar, cancelar ou
+// terminar de salvar), volta pra essa lista em vez de ir pra tela de cadastro genérica.
+function voltarParaTelaAnterior() {
+  const lista = telaAnterior === "lista-detalhe" ? listaAbertaAtual() : null;
+  if (lista) abrirListaDetalhe(lista);
+  else irParaTela(telaAnterior);
 }
 
 // "Convidar Amigo" no menu: usa o share sheet nativo do celular quando disponível (deixa a
@@ -1953,7 +1964,7 @@ async function salvarItem() {
       notificarMembrosEspaco(`${nomeExibicaoUsuario()} cadastrou o item "${nome}".`);
     }
     exibirSucesso("Item salvo com sucesso!");
-    irParaTela("cadastro-itens");
+    voltarParaTelaAnterior();
   } catch {
     mostrarMsg("#msg-form-item", "Não foi possível salvar. Tente novamente.", "erro");
   }
@@ -2735,11 +2746,7 @@ function ligarEventos() {
 
   $("#btn-menu").onclick = () => {
     if ($("#btn-menu").classList.contains("modo-voltar")) {
-      // "lista-detalhe" não é uma tela principal (irParaTela não sabe reabri-la com o título e os
-      // dados certos) — quando o item foi aberto de dentro de uma lista, volta pra essa lista.
-      const lista = telaAnterior === "lista-detalhe" ? listaAbertaAtual() : null;
-      if (lista) abrirListaDetalhe(lista);
-      else irParaTela(telaAnterior);
+      voltarParaTelaAnterior();
     } else {
       abrirMenu();
     }
@@ -2792,7 +2799,7 @@ function ligarEventos() {
 
   $("#btn-salvar-lista").onclick = salvarLista;
   $("#btn-excluir-lista").onclick = excluirListaAtual;
-  $("#btn-cancelar-lista").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-lista").onclick = voltarParaTelaAnterior;
 
   $("#ld-item-nome").addEventListener("input", (e) => {
     $("#ld-item-id").value = "";
@@ -2859,11 +2866,11 @@ function ligarEventos() {
   $("#fi-unidade").addEventListener("focus", (e) => renderSugestoesUnidade(e.target.value));
   $("#fi-unidade").addEventListener("blur", () => setTimeout(() => $("#fi-unidade-sugestoes").classList.add("hidden"), 150));
   $("#btn-excluir-item").onclick = excluirItemAtual;
-  $("#btn-cancelar-item").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-item").onclick = voltarParaTelaAnterior;
 
   $("#btn-salvar-grupo").onclick = salvarGrupo;
   $("#btn-excluir-grupo").onclick = excluirGrupoAtual;
-  $("#btn-cancelar-grupo").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-grupo").onclick = voltarParaTelaAnterior;
 
   $("#btn-salvar-local").onclick = salvarLocal;
   $("#btn-abrir-site-local").onclick = () => {
@@ -2871,15 +2878,15 @@ function ligarEventos() {
     if (site) window.open(site, "_blank", "noopener");
   };
   $("#btn-excluir-local").onclick = excluirLocalAtual;
-  $("#btn-cancelar-local").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-local").onclick = voltarParaTelaAnterior;
 
   $("#btn-salvar-forma").onclick = salvarForma;
   $("#btn-excluir-forma").onclick = excluirFormaAtual;
-  $("#btn-cancelar-forma").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-forma").onclick = voltarParaTelaAnterior;
 
   $("#btn-salvar-unidade").onclick = salvarUnidade;
   $("#btn-excluir-unidade").onclick = excluirUnidadeAtual;
-  $("#btn-cancelar-unidade").onclick = () => irParaTela(telaAnterior);
+  $("#btn-cancelar-unidade").onclick = voltarParaTelaAnterior;
 
   $("#btn-convidar").onclick = convidarParaEspaco;
 

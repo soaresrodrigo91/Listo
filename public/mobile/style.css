@@ -1658,25 +1658,16 @@ main::-webkit-scrollbar {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
-.linha-tripla {
-  display: grid;
-  grid-template-columns: 0.7fr 1fr 1fr;
-  gap: 10px;
-}
-.linha-dupla > .field,
-.linha-tripla > .field {
+.linha-dupla > .field {
   min-width: 0;
 }
-.linha-dupla > .field label,
-.linha-tripla > .field label {
+.linha-dupla > .field label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .linha-dupla > .field input,
-.linha-dupla > .field select,
-.linha-tripla > .field input,
-.linha-tripla > .field select {
+.linha-dupla > .field select {
   min-width: 0;
   width: 100%;
 }
