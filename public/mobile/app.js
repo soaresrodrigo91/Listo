@@ -259,6 +259,10 @@ let ultimoLocalUsadoId = null;
 let localMaisUsadoId = null;
 let telaAnterior = "inicio";
 let filtroGrupoLista = null, filtroGrupoItens = null;
+// Ordenação dos itens de uma lista já finalizada — só existe pra listas finalizadas (nome ou
+// valor, cada uma com sua própria direção); enquanto pendente, os itens seguem a ordem padrão
+// (pendentes primeiro, depois alfabética) e esse estado fica ignorado.
+let ordenacaoListaFinalizada = null, direcaoOrdenacaoListaFinalizada = "asc";
 let fracionavelUnidadeSelecionado = null;
 const termoBuscaCadastro = { itens: "", grupos: "", locais: "", formas: "", unidades: "" };
 
@@ -544,7 +548,6 @@ function reconectarEspaco(espacoId) {
     renderCadastroLocais();
     renderChipsFiltroLocal();
     renderDashboard();
-    renderLocaisMaisBaratos();
   });
   unsubFormas = onSnapshot(collection(bd, "espacos", espacoId, "formasPagamento"), (snap) => {
     formasAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -560,7 +563,6 @@ function reconectarEspaco(espacoId) {
     itensAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     renderCadastroItens();
     renderDashboard();
-    renderLocaisMaisBaratos();
   });
   unsubListas = onSnapshot(collection(bd, "espacos", espacoId, "listas"), (snap) => {
     listasAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -769,12 +771,11 @@ function renderDashboard() {
   $("#dash-valor-provisionado").textContent = formatarMoeda(valorProvisionado);
 
   renderCarrosselProximaCompra(pendentes);
-  renderLocaisMaisBaratos();
 
   getDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral")).then((snap) => {
     const geral = snap.exists() ? snap.data() : {};
     const totalCompras = geral.totalComprasFinalizadas || 0;
-    renderRankingDashboard("#dash-itens-mais", geral.itens || {}, (id) => itensAtuais.find((i) => i.id === id)?.nome || id, undefined, totalCompras, geral.ultimaCompraItens || {});
+    renderRankingItensPorQuantidade(geral.quantidadeItens || {}, geral.unidadeItens || {});
     renderRankingDashboard("#dash-grupos-mais", geral.grupos || {}, (nome) => nome, "#dash-barra-grupos", totalCompras, geral.ultimaCompraGrupos || {});
     renderRankingDashboard("#dash-locais-mais", geral.locais || {}, (id) => locaisAtuais.find((l) => l.id === id)?.nome || id, undefined, totalCompras);
   }).catch(() => {});
@@ -828,10 +829,10 @@ function renderCarrosselProximaCompra(pendentes) {
 }
 
 const CORES_RANKING = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea", "#0891b2"];
-// "minimoCompras" (opcional): com só 1 compra finalizada, todo item/local contaria como "1
-// ocorrência" — não é um ranking de verdade ainda, então fica vazio até haver mais de uma compra
-// pra comparar. Usado em itens/locais (contados por ocorrência); grupos (contado por
-// quantidade) não precisa disso, já é comparável desde a 1ª compra.
+// "minimoCompras" (opcional): com só 1 compra finalizada, todo local contaria como "1 ocorrência"
+// — não é um ranking de verdade ainda, então fica vazio até haver mais de uma compra pra comparar.
+// Usado em locais (contados por ocorrência); grupos (contado por quantidade) não precisa disso,
+// já é comparável desde a 1ª compra.
 // "ultimaCompraMap" desempata quando duas chaves têm a mesma contagem: a comprada mais
 // recentemente aparece primeiro, em vez de ficar na ordem arbitrária que o Firestore devolve.
 function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra, minimoCompras = Infinity, ultimaCompraMap = {}) {
@@ -869,6 +870,43 @@ function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra, 
       .map(([, contagem], i) => `<div style="width:${total ? (contagem / total) * 100 : 0}%;background:${CORES_RANKING[i % CORES_RANKING.length]}"></div>`)
       .join("");
   }
+}
+// "Itens mais comprados" é sempre por quantidade/unidade (2kg de arroz aparece como "2kg"),
+// nunca por ocorrência — diferente de grupos/locais, a contagem por ocorrência oscilava entre
+// itens empatados (mesma contagem, mesma data) porque a ordem que o Firestore devolve os
+// documentos não é estável entre leituras, e o desempate não tinha mais nenhum critério depois
+// disso. Quantidade é um número gravado (não depende de ordem de leitura) e o nome como
+// desempate final garante a mesma ordem sempre que duas quantidades empatam.
+function renderRankingItensPorQuantidade(mapaQuantidade, mapaUnidade) {
+  const container = $("#dash-itens-mais");
+  const entradas = Object.entries(mapaQuantidade)
+    .sort((a, b) => {
+      const porQuantidade = b[1] - a[1];
+      if (porQuantidade) return porQuantidade;
+      const nomeA = itensAtuais.find((it) => it.id === a[0])?.nome || "";
+      const nomeB = itensAtuais.find((it) => it.id === b[0])?.nome || "";
+      return nomeA.localeCompare(nomeB, "pt-BR");
+    })
+    .slice(0, 5);
+  if (entradas.length === 0) {
+    container.innerHTML = `<div class="dash-vazio">Ainda sem dados — marque itens como comprados para ver aqui.</div>`;
+    return;
+  }
+  const total = entradas.reduce((s, [, v]) => s + v, 0);
+  container.innerHTML = entradas
+    .map(([itemId, quantidade], i) => {
+      const nome = itensAtuais.find((it) => it.id === itemId)?.nome || itemId;
+      const unidade = mapaUnidade[itemId];
+      const numero = quantidade.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+      const pct = total ? Math.round((quantidade / total) * 100) : 0;
+      return `<div class="item-aplicacao">
+        <span class="dot" style="background:${CORES_RANKING[i % CORES_RANKING.length]}"></span>
+        <span class="nome">${esc(nome)}</span>
+        <span class="valor">${numero}${unidade ? ` ${esc(abreviarUnidade(unidade))}` : ""}</span>
+        <span class="percentual">${pct}%</span>
+      </div>`;
+    })
+    .join("");
 }
 
 /* ---------- carrossel de listas ---------- */
@@ -1106,22 +1144,25 @@ async function recomputarEstatisticasSeguro(contexto) {
 async function recomputarEstatisticasELista() {
   const snapListas = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas"));
   const finalizadas = snapListas.docs.map((d) => ({ id: d.id, ...d.data() })).filter((l) => l.finalizadaEm);
-  const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
-  // Data da compra mais recente de cada item/grupo — desempata o ranking quando duas chaves têm
-  // a mesma contagem (sem isso, o empate ficava na ordem meio arbitrária em que o Firestore
-  // devolve os documentos, sem nenhum critério visível pra quem está olhando o dashboard).
-  const ultimaCompraItens = {}, ultimaCompraGrupos = {};
+  const contagemGrupos = {}, contagemLocais = {};
+  // "Itens mais comprados" é por quantidade/unidade somada (2kg de arroz aparece como "2kg"), não
+  // por ocorrência — ver renderRankingItensPorQuantidade.
+  const quantidadeItens = {}, unidadeItens = {};
+  // Data da compra mais recente de cada grupo — desempata o ranking quando duas chaves têm a
+  // mesma contagem (sem isso, o empate ficava na ordem meio arbitrária em que o Firestore devolve
+  // os documentos, sem nenhum critério visível pra quem está olhando o dashboard).
+  const ultimaCompraGrupos = {};
   const atualizacoesPorLista = [];
   for (const lista of finalizadas) {
     const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
     const todosItens = snap.docs.map((d) => d.data());
     const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
-    // Itens, grupos e locais: todos por ocorrência (1 por compra em que apareceu) — não deixa
-    // algo comprado em grande quantidade, mas raramente, dominar o ranking de frequência.
+    // Grupos e locais: por ocorrência (1 por compra em que apareceu) — não deixa algo comprado em
+    // grande quantidade, mas raramente, dominar o ranking de frequência.
     comprados.forEach((i) => {
       const dataCompra = i.compradoEm || "";
-      contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) + 1;
-      if (dataCompra > (ultimaCompraItens[i.itemId] || "")) ultimaCompraItens[i.itemId] = dataCompra;
+      quantidadeItens[i.itemId] = (quantidadeItens[i.itemId] || 0) + (i.quantidade || 0);
+      unidadeItens[i.itemId] = i.unidade;
       contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) + 1;
       const grupo = i.grupoNome || "Outros";
       contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + 1;
@@ -1142,8 +1183,8 @@ async function recomputarEstatisticasELista() {
   // "estatisticas/geral" desatualizado e sobrescrever a tela com dados velhos/vazios por cima do
   // resultado certo. Gravando primeiro, qualquer render (o meu ou o do listener) já lê o final.
   await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-    itens: contagemItens, grupos: contagemGrupos, locais: contagemLocais, totalComprasFinalizadas: finalizadas.length,
-    ultimaCompraItens, ultimaCompraGrupos,
+    grupos: contagemGrupos, locais: contagemLocais, totalComprasFinalizadas: finalizadas.length,
+    ultimaCompraGrupos, quantidadeItens, unidadeItens,
   });
   for (const { id, dados } of atualizacoesPorLista) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", id), dados);
@@ -1198,6 +1239,8 @@ function abrirListaDetalhe(lista) {
   if (!lista) return;
   listaAbertaId = lista.id;
   filtroGrupoLista = null;
+  ordenacaoListaFinalizada = null;
+  direcaoOrdenacaoListaFinalizada = "asc";
   ultimoLocalUsadoId = null;
   carregarLocalMaisUsado();
   telaAnterior = "listas";
@@ -1427,10 +1470,29 @@ function renderListaDetalhe() {
   if (lista.finalizadaEm) fecharFormAdicionarItem();
   $("#wrap-adicionar-item").classList.toggle("hidden", !!lista.finalizadaEm);
 
-  itens = [...itens].sort((a, b) => {
-    if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
-    return a.nome.localeCompare(b.nome, "pt-BR");
+  // Ordenação por nome/valor só faz sentido numa lista já finalizada (comprar itens embaralha
+  // a ordem qualquer forma) — pendente continua com a ordem padrão de sempre.
+  $("#ordenacao-lista-finalizada").classList.toggle("hidden", !lista.finalizadaEm);
+  const SETA_ORDENACAO = { asc: "↑", desc: "↓" };
+  ["nome", "valor"].forEach((tipo) => {
+    const btn = $(`#btn-ordenar-lista-${tipo}`);
+    const ativo = ordenacaoListaFinalizada === tipo;
+    btn.classList.toggle("ativo", ativo);
+    const rotulo = tipo === "nome" ? "Ordenar por nome" : "Ordenar por valor";
+    btn.textContent = ativo ? `${rotulo} ${SETA_ORDENACAO[direcaoOrdenacaoListaFinalizada]}` : rotulo;
   });
+
+  if (lista.finalizadaEm && ordenacaoListaFinalizada) {
+    const mult = direcaoOrdenacaoListaFinalizada === "asc" ? 1 : -1;
+    itens = [...itens].sort((a, b) => ordenacaoListaFinalizada === "nome"
+      ? mult * a.nome.localeCompare(b.nome, "pt-BR")
+      : mult * ((a.subtotal || 0) - (b.subtotal || 0)));
+  } else {
+    itens = [...itens].sort((a, b) => {
+      if (a.comprado !== b.comprado) return a.comprado ? 1 : -1;
+      return a.nome.localeCompare(b.nome, "pt-BR");
+    });
+  }
 
   const espacoCompartilhado = (espacoAtual.membros || []).length > 1;
 
@@ -1519,10 +1581,8 @@ async function reabrirLista() {
     finalizadaEm: null, pagamentos: null, valorTotalPago: null, desconto: null,
   });
   // Recalcula do zero com a lista já fora da lista de finalizadas — ela some sozinha da
-  // contagem, sem precisar desfazer nada manualmente (ver recomputarEstatisticasELista). Também
-  // cobre o "Locais mais baratos" (histórico apagado acima não tem listener próprio).
+  // contagem, sem precisar desfazer nada manualmente (ver recomputarEstatisticasELista).
   await recomputarEstatisticasSeguro("reabrir lista");
-  renderLocaisMaisBaratos();
   exibirSucesso("Lista reaberta!");
 }
 
@@ -2678,56 +2738,6 @@ function ultimosPorLocal(registros) {
   return [...porLocal.values()];
 }
 
-async function renderLocaisMaisBaratos() {
-  const container = $("#dash-locais-baratos");
-  if (!container) return;
-  if (itensAtuais.length === 0 || locaisAtuais.length === 0) {
-    container.innerHTML = `<div class="dash-vazio">Cadastre itens e locais para comparar preços.</div>`;
-    return;
-  }
-  const somaIndicePorLocal = new Map();
-  const contagemPorLocal = new Map();
-
-  for (const item of itensAtuais) {
-    const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-    // Exclui a linha-semente do cadastro (origemCadastro, localId null) — ela não é uma compra
-    // real num local, e contava como um "2º local" falso, fazendo a comparação aparecer já com
-    // só 1 compra de verdade (quando na real só existe 1 local pra comparar, não 2).
-    const registros = ultimosPorLocal(snap.docs.map((d) => d.data()).filter((r) => !r.origemCadastro && r.localId));
-    if (registros.length < 2) continue;
-    const mediaDoItem = registros.reduce((s, r) => s + r.valor, 0) / registros.length;
-    if (mediaDoItem <= 0) continue;
-    for (const r of registros) {
-      const indice = r.valor / mediaDoItem;
-      somaIndicePorLocal.set(r.localId, (somaIndicePorLocal.get(r.localId) || 0) + indice);
-      contagemPorLocal.set(r.localId, (contagemPorLocal.get(r.localId) || 0) + 1);
-    }
-  }
-
-  const ranking = [...contagemPorLocal.entries()]
-    .map(([localId, contagem]) => ({
-      nome: locaisAtuais.find((l) => l.id === localId)?.nome || "—",
-      indiceMedio: somaIndicePorLocal.get(localId) / contagem,
-    }))
-    .sort((a, b) => a.indiceMedio - b.indiceMedio);
-
-  if (ranking.length === 0) {
-    container.innerHTML = `<div class="dash-vazio">Ainda sem dados suficientes — compre o mesmo item em mais de um local para comparar preços.</div>`;
-    return;
-  }
-
-  container.innerHTML = ranking
-    .map((r) => {
-      const percentual = Math.round((r.indiceMedio - 1) * 100);
-      const cor = percentual < 0 ? "var(--status-verde)" : percentual > 0 ? "var(--status-vermelho)" : "var(--muted)";
-      const texto = percentual === 0 ? "na média" : percentual < 0 ? `${Math.abs(percentual)}% mais barato` : `${percentual}% mais caro`;
-      return `<div class="item-aplicacao">
-        <span class="nome">${esc(r.nome)}</span>
-        <span class="percentual" style="color:${cor};width:auto;font-weight:700">${texto}</span>
-      </div>`;
-    })
-    .join("");
-}
 function abrirFormNovoLocal() {
   telaAnterior = "cadastro-locais";
   $("#fl-id").value = "";
@@ -2757,7 +2767,7 @@ function abrirFormEditarLocal(local) {
 
 // Compara, item a item, a média de preço pago neste local com a média nos demais locais onde o
 // mesmo item já foi comprado — só entram itens comprados em 2+ locais diferentes, senão não há
-// o que comparar. É o inverso de renderLocaisMaisBaratos: aqui o agrupamento é por item.
+// o que comparar.
 async function renderItensMaisBaratosNoLocal(localId) {
   const card = $("#fl-itens-baratos-card");
   const container = $("#fl-itens-baratos");
@@ -3189,10 +3199,9 @@ function irParaTela(nome) {
   document.querySelectorAll(".menu-item").forEach((item) => item.classList.toggle("ativa", item.dataset.tela === nome));
   $("#topbar-titulo").textContent = TITULOS_TELA_PRINCIPAL[nome] ?? "";
   $("#btn-menu").classList.remove("modo-voltar");
-  // O histórico de preços muda com frequência (toda compra confirmada) sem que grupos/locais/
-  // itens mudem — por isso esses dois precisam recalcular também ao simplesmente abrir a tela
-  // (senão mostram o valor de quando a tela foi renderizada pela última vez, não o atual).
-  if (nome === "inicio") renderLocaisMaisBaratos();
+  // O histórico de preços muda com frequência (toda compra confirmada) sem que o cadastro de
+  // itens mude — precisa recalcular também ao simplesmente abrir a tela (senão mostra o valor de
+  // quando a tela foi renderizada pela última vez, não o atual).
   if (nome === "cadastro-itens") renderCadastroItens();
   // O filtro de mês da tela "Listas de Compras" nunca persiste de uma visita pra outra — sempre
   // volta a abrir no mês atual.
@@ -3448,6 +3457,19 @@ function ligarEventos() {
   });
   $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
   $("#btn-reabrir-lista").onclick = reabrirLista;
+
+  ["nome", "valor"].forEach((tipo) => {
+    $(`#btn-ordenar-lista-${tipo}`).onclick = () => {
+      if (ordenacaoListaFinalizada === tipo) {
+        direcaoOrdenacaoListaFinalizada = direcaoOrdenacaoListaFinalizada === "asc" ? "desc" : "asc";
+      } else {
+        ordenacaoListaFinalizada = tipo;
+        // Valor começa do mais caro pro mais barato; nome começa de A a Z.
+        direcaoOrdenacaoListaFinalizada = tipo === "valor" ? "desc" : "asc";
+      }
+      renderListaDetalhe();
+    };
+  });
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
