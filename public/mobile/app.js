@@ -246,6 +246,10 @@ let historicoAtual = [];
 let convitesAtuais = [];
 let notificacoesAtuais = [];
 let listaAbertaId = null;
+// Guarda de qual lista veio o atalho "+ Cadastrar" (busca de item sem resultado, dentro de uma
+// lista) — só setado por esse fluxo específico, pra saber depois de salvar o cadastro se deve
+// oferecer pra adicionar o item recém-criado direto nessa lista.
+let listaOrigemNovoItem = null;
 let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
 // Último valor considerado (cadastro/último comprado/mais barato) pro item aberto no modal de
@@ -694,6 +698,11 @@ async function renderSugestoesItemLista(query) {
   const container = $("#ld-item-sugestoes");
   const termo = normalizarTexto(query);
   const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => itemCombinaComBusca(i, termo)).slice(0, 6);
+  // Invalida qualquer busca assíncrona anterior (valores dos itens encontrados) já na entrada da
+  // função, não só quando ESTA chamada encontra itens — senão uma resposta lenta de uma busca
+  // antiga (que tinha achado algo) pode chegar depois e sobrescrever o "não encontrado" mais
+  // recente com uma lista de itens já obsoleta, escondendo o atalho de cadastro.
+  const meuToken = ++tokenSugestoesItemLista;
 
   if (termo.length === 0) {
     container.classList.add("hidden");
@@ -713,10 +722,10 @@ async function renderSugestoesItemLista(query) {
       // Veio do atalho dentro da lista — ao salvar (ou cancelar), volta pra essa lista em vez de
       // ir pra tela de cadastro de itens.
       telaAnterior = "lista-detalhe";
+      listaOrigemNovoItem = listaAbertaId;
     };
     return;
   }
-  const meuToken = ++tokenSugestoesItemLista;
   // Mesma regra de preferência (Configurações) usada ao adicionar o item de fato: valor do
   // cadastro, último comprado ou mais barato — sem histórico ainda, cai no valor do cadastro.
   // Uma falha de rede aqui não pode travar a seleção do item: sem valor, mostra R$ 0,00 mas
@@ -864,32 +873,66 @@ function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra, 
 
 /* ---------- carrossel de listas ---------- */
 // Filtro de mês/ano da tela "Listas de Compras" — sempre abre no mês atual (resetado em
-// irParaTela) e nunca persiste entre visitas à tela. Dois <select> em vez de <input type="month">
-// porque o input nativo tem suporte inconsistente entre navegadores (Firefox, por exemplo, não
-// implementa o picker — cai num texto simples onde não dá pra trocar o ano direito).
+// irParaTela) e nunca persiste entre visitas à tela. Um botão único "Agosto 2026" (em vez de dois
+// <select>) abre um seletor próprio de mês/ano (sem dias) — o <input type="month"> nativo tem
+// suporte inconsistente entre navegadores (Firefox, por exemplo, não implementa o picker — cai
+// num texto simples onde não dá pra trocar o ano direito).
 const NOMES_MESES_FILTRO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 let filtroMesAnoListas = mesAnoAtual();
-function popularFiltroMesAnoListas() {
-  $("#filtro-mes-listas").innerHTML = NOMES_MESES_FILTRO.map((nome, idx) => `<option value="${idx + 1}">${nome}</option>`).join("");
-  const anoAtual = new Date().getFullYear();
-  const anos = [];
-  for (let a = anoAtual + 1; a >= anoAtual - 5; a--) anos.push(a);
-  $("#filtro-ano-listas").innerHTML = anos.map((a) => `<option value="${a}">${a}</option>`).join("");
+// Ano sendo navegado DENTRO do seletor aberto — separado do filtro aplicado, pra passear entre
+// anos no picker sem mudar a lista mostrada por trás até escolher um mês de fato.
+let anoExibidoSeletorMesAno = new Date().getFullYear();
+function atualizarRotuloMesAnoListas() {
+  const [ano, mes] = filtroMesAnoListas.split("-");
+  const el = $("#rotulo-mes-ano-listas");
+  if (el) el.textContent = `${NOMES_MESES_FILTRO[Number(mes) - 1]} ${ano}`;
 }
 function aplicarFiltroMesAtualListas() {
-  const agora = new Date();
-  $("#filtro-mes-listas").value = String(agora.getMonth() + 1);
-  $("#filtro-ano-listas").value = String(agora.getFullYear());
   filtroMesAnoListas = mesAnoAtual();
+  atualizarRotuloMesAnoListas();
 }
-// Lê os dois <select> (não o valor nativo de um <input type="month">) pra montar a mesma string
-// "YYYY-MM" usada na comparação com mesAnoDoTimestamp.
-function lerFiltroMesAnoListasDosSelects() {
-  const mes = $("#filtro-mes-listas").value.padStart(2, "0");
-  const ano = $("#filtro-ano-listas").value;
-  filtroMesAnoListas = `${ano}-${mes}`;
+function escolherMesAnoListas(mes, ano) {
+  filtroMesAnoListas = `${ano}-${String(mes).padStart(2, "0")}`;
+  atualizarRotuloMesAnoListas();
+  fecharSeletorMesAno();
+  renderCarrosselListas();
+}
+function renderGradeSeletorMesAno() {
+  $("#seletor-mes-ano-ano-exibido").textContent = String(anoExibidoSeletorMesAno);
+  const [anoSelecionado, mesSelecionado] = filtroMesAnoListas.split("-").map(Number);
+  const hoje = new Date();
+  $("#seletor-mes-ano-grade").innerHTML = NOMES_MESES_FILTRO.map((nome, idx) => {
+    const mes = idx + 1;
+    const selecionado = anoExibidoSeletorMesAno === anoSelecionado && mes === mesSelecionado;
+    const atual = anoExibidoSeletorMesAno === hoje.getFullYear() && mes === hoje.getMonth() + 1;
+    const classe = selecionado ? " mes-selecionado" : atual ? " mes-atual" : "";
+    return `<button type="button" class="seletor-mes-botao${classe}" data-mes="${mes}">${nome.slice(0, 3)}</button>`;
+  }).join("");
+  $("#seletor-mes-ano-grade").querySelectorAll(".seletor-mes-botao").forEach((btn) => {
+    btn.onclick = () => escolherMesAnoListas(Number(btn.dataset.mes), anoExibidoSeletorMesAno);
+  });
+}
+function abrirSeletorMesAno() {
+  anoExibidoSeletorMesAno = Number(filtroMesAnoListas.split("-")[0]);
+  renderGradeSeletorMesAno();
+  $("#overlay-seletor-mes-ano").classList.remove("hidden");
+}
+function fecharSeletorMesAno() {
+  $("#overlay-seletor-mes-ano").classList.add("hidden");
+}
+// Soma o valor REAL (já com desconto, pagamentos batidos) só das compras finalizadas dentro do
+// mês/ano filtrado — listas ainda pendentes não têm "valorTotalPago" de verdade, então não
+// entram nessa conta (diferente do card individual, que mostra o provisionado pra elas).
+function atualizarTotalListasMes() {
+  const el = $("#total-listas-mes-valor");
+  if (!el) return;
+  const total = listasAtuais
+    .filter((l) => l.finalizadaEm && mesAnoDoTimestamp(l.finalizadaEm) === filtroMesAnoListas)
+    .reduce((s, l) => s + (l.valorTotalPago || 0), 0);
+  el.textContent = formatarMoeda(total);
 }
 function renderCarrosselListas() {
+  atualizarTotalListasMes();
   const container = $("#carrossel-listas");
   if (listasAtuais.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista ainda. Toque em “+” para criar a primeira.</div>`;
@@ -954,7 +997,10 @@ function renderCarrosselListas() {
         <div class="card-lista-resumo-itens">
           <span><span class="icone-comprado">✓</span> ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
           <span><span class="icone-pendente">×</span> ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
-          <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
+          <span class="card-lista-acoes">
+            ${l.finalizadaEm ? `<button type="button" class="btn-detalhes-card" data-id-detalhes="${l.id}">Detalhes</button>` : ""}
+            <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
+          </span>
         </div>
         ${comparativo}
       </div>`;
@@ -967,6 +1013,12 @@ function renderCarrosselListas() {
     btn.onclick = (e) => {
       e.stopPropagation();
       compartilharListaWhatsApp(listasAtuais.find((l) => l.id === btn.dataset.idCompartilhar));
+    };
+  });
+  container.querySelectorAll(".btn-detalhes-card").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      abrirModalDetalhesCompra(listasAtuais.find((l) => l.id === btn.dataset.idDetalhes));
     };
   });
 }
@@ -1263,6 +1315,61 @@ async function compartilharListaWhatsApp(lista) {
     .join("\n");
   const texto = `🛒 *${lista.nome}*\n\n${linhas || "Nenhum item ainda."}\n\nTotal previsto: ${formatarMoeda(lista.valorProvisionadoTotal || 0)}`;
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
+}
+
+// Assim como compartilharListaWhatsApp, recebe a lista direto (acionado a partir do resumo na
+// tela "Listas de Compras") e busca os itens na hora — só faz sentido pra lista já finalizada.
+async function abrirModalDetalhesCompra(lista) {
+  if (!lista) return;
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
+  const itens = snap.docs.map((d) => d.data());
+  const comprados = itens.filter((i) => i.comprado);
+  const pendentes = itens.filter((i) => !i.comprado);
+  // Mesma conta do card na tela de Listas (somaQuantidades): cada item conta pela quantidade, não
+  // por linha — 3un do mesmo item conta como 3, não como 1 linha.
+  const qtdItens = somaQuantidades(itens);
+  const qtdComprados = somaQuantidades(comprados);
+  const qtdPendentes = somaQuantidades(pendentes);
+
+  const ordenadosPorValor = [...comprados].sort((a, b) => (a.subtotal || 0) - (b.subtotal || 0));
+  const maisBarato = ordenadosPorValor[0];
+  const maisCaro = ordenadosPorValor[ordenadosPorValor.length - 1];
+
+  const idsLocais = [...new Set(comprados.map((i) => i.localCompraId).filter(Boolean))];
+  const nomesLocais = idsLocais.map((id) => locaisAtuais.find((l) => l.id === id)?.nome || "—").join(", ");
+
+  const provisionado = lista.valorProvisionadoOriginalTotal ?? lista.valorProvisionadoTotal ?? 0;
+  const real = lista.valorTotalPago ?? 0;
+  const diferenca = real - provisionado;
+  const corDiferenca = diferenca > 0 ? "var(--status-vermelho)" : diferenca < 0 ? "var(--status-verde)" : "var(--muted)";
+
+  const linhasPagamento = (lista.pagamentos || []).map((p) => {
+    const forma = formasAtuais.find((f) => f.id === p.formaPagamentoId)?.nome || "—";
+    const parcelas = p.parcelas > 1 ? ` em ${p.parcelas}x` : "";
+    return [`Pagamento (${forma})`, `${formatarMoeda(p.valor)}${parcelas}`];
+  });
+
+  const linhas = [
+    ["Data e hora", formatarDataHoraBR(lista.finalizadaEm) || "—"],
+    ["Local", nomesLocais || "—"],
+    ["Itens", `${qtdItens} (${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"}, ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"})`],
+    ...(pendentes.length > 0 ? [["Pendentes", pendentes.map((i) => i.nome).join(", ")]] : []),
+    ["Item mais caro", maisCaro ? `${maisCaro.nome} (${formatarMoeda(maisCaro.subtotal)})` : "—"],
+    ["Item mais barato", maisBarato ? `${maisBarato.nome} (${formatarMoeda(maisBarato.subtotal)})` : "—"],
+    ...linhasPagamento,
+    ["Desconto", formatarMoeda(lista.desconto || 0)],
+    ["Provisionado", formatarMoeda(provisionado)],
+    ["Total da compra (real)", formatarMoeda(real)],
+  ];
+
+  $("#detalhes-compra-conteudo").innerHTML =
+    linhas.map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
+    `<div class="detalhe-linha"><span class="rotulo">Diferença</span><span class="valor-detalhe" style="color:${corDiferenca}">${diferenca > 0 ? "+" : ""}${formatarMoeda(diferenca)}</span></div>`;
+
+  $("#overlay-detalhes-compra").classList.remove("hidden");
+}
+function fecharModalDetalhesCompra() {
+  $("#overlay-detalhes-compra").classList.add("hidden");
 }
 
 // Preço unitário mostrado na linha pequena (R$/kg, R$/un...): "valorPago" já é por unidade (ver
@@ -1582,11 +1689,12 @@ async function adicionarItemNaLista() {
 // Busca os itens direto do servidor (getDocs) em vez de usar itensListaAtuais: logo após um
 // addDoc/updateDoc/deleteDoc, o listener onSnapshot pode ainda não ter atualizado o cache local,
 // e os totais ficariam errados se lêssemos o array em memória nesse instante.
-// Conta "quantidade de itens" pela quantidade de cada linha (arroz com quantidade 3 conta como
-// 3 itens, não como 1 linha) — senão a contagem fica menor do que a real. Cada linha conta pelo
-// menos 1, mesmo com quantidade fracionária pequena (ex.: 0,2kg não pode virar 0 no arredondamento.
+// Conta "quantidade de itens" pela quantidade de cada linha só quando a unidade é contável
+// (arroz em pacotes com quantidade 3 conta como 3 itens, não como 1 linha) — senão a contagem
+// fica menor do que a real. Unidade fracionável (kg, g, ml, l) é sempre 1: é um produto só,
+// só pesado/medido em vez de contado — 2kg de arroz não são "2 itens comprados".
 function somaQuantidades(itens) {
-  return itens.reduce((s, i) => s + Math.max(1, Math.round(i.quantidade || 1)), 0);
+  return itens.reduce((s, i) => s + (unidadeAceitaFracao(i.unidade) ? 1 : Math.max(1, Math.round(i.quantidade || 1))), 0);
 }
 async function recalcularTotaisLista(listaId = listaAbertaId) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"));
@@ -1673,6 +1781,27 @@ function atualizarDiferencaValorComprar() {
   el.className = `mc-valor-diferenca ${tendencia}`;
   el.innerHTML = `${setaTendenciaHtml(tendencia)} ${diferenca < 0 ? "−" : "+"}${formatarMoeda(Math.abs(diferenca))} em relação ao último valor`;
 }
+// "Valor pago" é sempre por unidade — com mais de 1 unidade nessa linha, deixa claro quanto isso
+// dá no total (provisionado ao abrir o modal, e ao vivo conforme o valor digitado muda), já que
+// o total só aparece de novo depois de confirmar a compra.
+function atualizarLegendaValorTotalComprar() {
+  const el = $("#mc-valor-total");
+  if (!el) return;
+  const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
+  if (!item) {
+    el.textContent = "";
+    return;
+  }
+  const fracionavel = unidadeAceitaFracao(item.unidade);
+  const quantidade = fracionavel ? Number($("#mc-quantidade").value) || 0 : item.quantidade || 0;
+  if (!(quantidade > 1)) {
+    el.textContent = "";
+    return;
+  }
+  const valor = paraNumero($("#mc-valor").value);
+  const numero = quantidade.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  el.textContent = `Total para ${numero}${item.unidade ? ` ${abreviarUnidade(item.unidade)}` : ""}: ${formatarMoeda(quantidade * valor)}`;
+}
 async function abrirModalComprar(itemListaId) {
   itemListaPendenteId = itemListaId;
   const item = itensListaAtuais.find((i) => i.id === itemListaId);
@@ -1703,6 +1832,7 @@ async function abrirModalComprar(itemListaId) {
   $("#rotulo-mc-valor").textContent = `Valor pago (por ${abreviarUnidade(item.unidade)}) *`;
   $("#mc-valor").value = item.valorProvisionado ? formatarMoeda(item.valorProvisionado) : "";
   atualizarDiferencaValorComprar();
+  atualizarLegendaValorTotalComprar();
   // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
   // lembrando o último local escolhido (só falta informar o valor a cada item seguinte).
   const localSugerido = ultimoLocalUsadoId || localMaisUsadoId;
@@ -1722,13 +1852,12 @@ async function abrirModalComprar(itemListaId) {
   valorReferenciaModalComprar = origemValor.valor || 0;
   $("#mc-valor").value = origemValor.valor ? formatarMoeda(origemValor.valor) : "";
   atualizarDiferencaValorComprar();
-  // Sem local (preferência "cadastro" ou nenhuma compra registrada ainda), deixa explícito que o
-  // valor de referência é o do cadastro, não uma compra real num local específico. O prefixo
-  // "Último valor considerado" deixa claro que é isso que foi usado pra pré-preencher o campo
-  // acima (conforme a preferência em Configurações), não necessariamente a última compra feita.
+  atualizarLegendaValorTotalComprar();
+  // O prefixo "Último valor considerado" deixa claro que é isso que foi usado pra pré-preencher o
+  // campo acima (conforme a preferência em Configurações), não necessariamente a última compra feita.
   const nomeLocal = origemValor.localId ? locaisAtuais.find((l) => l.id === origemValor.localId)?.nome : null;
   const detalheOrigem = origemValor.origem === "cadastro"
-    ? "Valor do cadastro (sem local registrado)"
+    ? "Valor do cadastro"
     : `${ROTULOS_ORIGEM_VALOR[origemValor.origem]}${nomeLocal ? ` · ${nomeLocal}` : ""}`;
   if (referenciaEl) referenciaEl.textContent = `Último valor considerado — ${detalheOrigem}: ${formatarMoeda(origemValor.valor)}`;
 }
@@ -2228,6 +2357,10 @@ async function renderHistoricoItem(item) {
 
 function abrirFormNovoItem() {
   telaAnterior = "cadastro-itens";
+  // Só o atalho "+ Cadastrar" dentro de uma lista seta isso de novo, logo depois desta chamada —
+  // limpa aqui pra um "Novo item" vindo de Cadastros > Itens nunca herdar uma lista de uma visita
+  // anterior a este formulário.
+  listaOrigemNovoItem = null;
   $("#fi-id").value = "";
   $("#fi-nome").value = "";
   $("#fi-descricao").value = "";
@@ -2321,6 +2454,7 @@ function renderSugestoesItem(query) {
 }
 async function abrirFormEditarItem(item) {
   telaAnterior = "cadastro-itens";
+  listaOrigemNovoItem = null;
   $("#fi-id").value = item.id;
   $("#fi-nome").value = item.nome;
   $("#fi-descricao").value = item.descricao || "";
@@ -2398,6 +2532,26 @@ async function salvarItem() {
         localId: null, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
       });
       notificarMembrosEspaco(`${nomeExibicaoUsuario()} cadastrou o item "${nome}".`);
+      // Cadastro veio do atalho "+ Cadastrar" de dentro de uma lista (busca sem resultado) —
+      // pergunta se quer aproveitar e já jogar o item recém-criado nessa mesma lista, em vez de
+      // ter que abrir "Adicionar item" e buscar de novo.
+      if (listaOrigemNovoItem) {
+        const listaId = listaOrigemNovoItem;
+        listaOrigemNovoItem = null;
+        const listaAlvo = listasAtuais.find((l) => l.id === listaId);
+        if (listaAlvo && confirm(`Adicionar "${nome}" à lista "${listaAlvo.nome}"?`)) {
+          const adicionadoPorNome = nomeExibicaoUsuario();
+          await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
+            itemId: refItem.id, nome: dados.nome, marca: dados.marca, descricao: dados.descricao,
+            descricaoUnidade: dados.descricaoUnidade, unidade: dados.unidade, grupoNome: dados.grupoNome,
+            quantidade: 1, valorProvisionado: dados.valor, subtotal: dados.valor, subtotalProvisionado: dados.valor,
+            comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
+            adicionadoPor: usuario.uid, adicionadoPorNome,
+          });
+          recalcularTotaisLista(listaId);
+          notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${dados.nome}" à lista "${listaAlvo.nome}".`);
+        }
+      }
     }
     exibirSucesso("Item salvo com sucesso!");
     voltarParaTelaAnterior();
@@ -3230,19 +3384,14 @@ function ligarEventos() {
     };
   });
   $("#fab-listas").onclick = abrirFormNovaLista;
-  popularFiltroMesAnoListas();
   aplicarFiltroMesAtualListas();
-  $("#filtro-mes-listas").addEventListener("change", () => {
-    lerFiltroMesAnoListasDosSelects();
-    renderCarrosselListas();
-  });
-  $("#filtro-ano-listas").addEventListener("change", () => {
-    lerFiltroMesAnoListasDosSelects();
-    renderCarrosselListas();
-  });
-  $("#btn-mes-atual-listas").onclick = () => {
-    aplicarFiltroMesAtualListas();
-    renderCarrosselListas();
+  $("#btn-abrir-seletor-mes-ano").onclick = abrirSeletorMesAno;
+  $("#overlay-seletor-mes-ano").addEventListener("click", (e) => { if (e.target.id === "overlay-seletor-mes-ano") fecharSeletorMesAno(); });
+  $("#btn-seletor-ano-anterior").onclick = () => { anoExibidoSeletorMesAno--; renderGradeSeletorMesAno(); };
+  $("#btn-seletor-ano-proximo").onclick = () => { anoExibidoSeletorMesAno++; renderGradeSeletorMesAno(); };
+  $("#btn-seletor-mes-ano-este-mes").onclick = () => {
+    const agora = new Date();
+    escolherMesAnoListas(agora.getMonth() + 1, agora.getFullYear());
   };
   $("#fab-cadastro-itens").onclick = abrirFormNovoItem;
   $("#fab-cadastro-grupos").onclick = abrirFormNovoGrupo;
@@ -3311,6 +3460,9 @@ function ligarEventos() {
   $("#btn-confirmar-finalizar").onclick = confirmarFinalizar;
   $("#btn-cancelar-finalizar").onclick = fecharModalFinalizar;
   $("#overlay-finalizar").addEventListener("click", (e) => { if (e.target.id === "overlay-finalizar") fecharModalFinalizar(); });
+
+  $("#btn-fechar-detalhes-compra").onclick = fecharModalDetalhesCompra;
+  $("#overlay-detalhes-compra").addEventListener("click", (e) => { if (e.target.id === "overlay-detalhes-compra") fecharModalDetalhesCompra(); });
   $("#btn-add-pagamento").onclick = () => {
     // Já sugere o restante a alocar como valor da nova linha — ex.: total R$800, R$500 já
     // preenchidos na primeira forma, a segunda já nasce com R$300 em vez de vazia.
@@ -3391,7 +3543,11 @@ function ligarEventos() {
     aplicarTema(escuro);
   };
   ["#mc-valor", "#fi-valor", "#fin-desconto"].forEach(ligarMascaraMoeda);
-  $("#mc-valor").addEventListener("input", atualizarDiferencaValorComprar);
+  $("#mc-valor").addEventListener("input", () => {
+    atualizarDiferencaValorComprar();
+    atualizarLegendaValorTotalComprar();
+  });
+  $("#mc-quantidade").addEventListener("input", atualizarLegendaValorTotalComprar);
   $("#fin-desconto").addEventListener("input", atualizarValorFinalFinalizar);
   ["#ld-quantidade"].forEach(bloquearCaracteresInvalidosNumero);
   ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);

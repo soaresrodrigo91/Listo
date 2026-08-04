@@ -106,7 +106,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.74</div>
+      <div class="menu-versao" id="app-versao">01.75</div>
     </div>
   </aside>
 
@@ -192,15 +192,33 @@
   <div id="tela-listas" class="screen hidden">
     <div class="cabecalho-fixo">
       <div class="filtro-mes-wrap">
-        <select id="filtro-mes-listas" aria-label="Mês"></select>
-        <select id="filtro-ano-listas" aria-label="Ano"></select>
-        <button type="button" class="btn-secundario" id="btn-mes-atual-listas">Este mês</button>
+        <button type="button" class="seletor-mes-ano" id="btn-abrir-seletor-mes-ano">
+          <span id="rotulo-mes-ano-listas"></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="total-listas-mes">
+          <span class="rotulo">Total do período</span>
+          <span class="valor" id="total-listas-mes-valor">R$ 0,00</span>
+        </div>
       </div>
     </div>
     <main>
       <div class="carrossel-listas" id="carrossel-listas"></div>
     </main>
     <button class="fab" id="fab-listas">+</button>
+  </div>
+
+  <!-- ---------- Modal: escolher mês/ano (filtro de Listas de Compras) ---------- -->
+  <div class="overlay-mes hidden" id="overlay-seletor-mes-ano">
+    <div class="cartao-mes">
+      <div class="seletor-mes-ano-cabecalho">
+        <button type="button" id="btn-seletor-ano-anterior" aria-label="Ano anterior">‹</button>
+        <span id="seletor-mes-ano-ano-exibido"></span>
+        <button type="button" id="btn-seletor-ano-proximo" aria-label="Próximo ano">›</button>
+      </div>
+      <div class="seletor-mes-ano-grade" id="seletor-mes-ano-grade"></div>
+      <button type="button" class="btn-secundario" id="btn-seletor-mes-ano-este-mes">Este mês</button>
+    </div>
   </div>
 
   <!-- ---------- Lista (detalhe) ---------- -->
@@ -556,6 +574,7 @@
         <label id="rotulo-mc-valor">Valor pago (unitário) *</label>
         <input id="mc-valor" type="text" inputmode="decimal" placeholder="0,00">
         <div id="mc-valor-diferenca" class="mc-valor-diferenca"></div>
+        <div id="mc-valor-total" class="mc-valor-referencia"></div>
       </div>
       <div id="msg-comprar"></div>
       <button class="btn" id="btn-confirmar-compra">Confirmar</button>
@@ -589,6 +608,15 @@
       <div id="msg-finalizar"></div>
       <button class="btn" id="btn-confirmar-finalizar">Finalizar</button>
       <button class="btn-secundario" id="btn-cancelar-finalizar">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- ---------- Modal: detalhes da compra finalizada ---------- -->
+  <div class="overlay-mes hidden" id="overlay-detalhes-compra">
+    <div class="cartao-mes">
+      <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Detalhes da compra</h3>
+      <div id="detalhes-compra-conteudo"></div>
+      <button class="btn-secundario" id="btn-fechar-detalhes-compra" style="margin-top:14px">Fechar</button>
     </div>
   </div>
 
