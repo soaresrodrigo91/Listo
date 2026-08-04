@@ -734,6 +734,19 @@ textarea {
   font-weight: 700;
   font-size: 17px;
 }
+.seletor-mes-ano-ano-btn {
+  font-family: "Sora";
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+.seletor-mes-ano-ano-btn:active {
+  background: var(--bg-soft);
+}
 .seletor-mes-ano-cabecalho button {
   width: 32px;
   height: 32px;
@@ -1104,7 +1117,7 @@ textarea {
 main {
   flex: 1;
   min-height: 0;
-  padding: 4px 16px 90px;
+  padding: 4px 16px calc(90px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 10px;

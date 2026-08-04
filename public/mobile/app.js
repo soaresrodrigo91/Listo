@@ -920,6 +920,11 @@ let filtroMesAnoListas = mesAnoAtual();
 // Ano sendo navegado DENTRO do seletor aberto — separado do filtro aplicado, pra passear entre
 // anos no picker sem mudar a lista mostrada por trás até escolher um mês de fato.
 let anoExibidoSeletorMesAno = new Date().getFullYear();
+// Tocar no ano do cabeçalho troca a grade de meses por uma grade de anos (em vez de só avançar/
+// voltar um ano de cada vez nas setinhas) — mais rápido pra pular vários anos de uma vez.
+let modoSeletorAno = false;
+let anoBaseSeletorAno = 0;
+const ANOS_POR_PAGINA_SELETOR = 12;
 function atualizarRotuloMesAnoListas() {
   const [ano, mes] = filtroMesAnoListas.split("-");
   const el = $("#rotulo-mes-ano-listas");
@@ -935,10 +940,37 @@ function escolherMesAnoListas(mes, ano) {
   fecharSeletorMesAno();
   renderCarrosselListas();
 }
+function alternarModoAnoSeletor() {
+  modoSeletorAno = !modoSeletorAno;
+  if (modoSeletorAno) {
+    anoBaseSeletorAno = anoExibidoSeletorMesAno - Math.floor(ANOS_POR_PAGINA_SELETOR / 2);
+  }
+  renderGradeSeletorMesAno();
+}
+function escolherAnoSeletor(ano) {
+  anoExibidoSeletorMesAno = ano;
+  modoSeletorAno = false;
+  renderGradeSeletorMesAno();
+}
 function renderGradeSeletorMesAno() {
+  const hoje = new Date();
+  if (modoSeletorAno) {
+    $("#seletor-mes-ano-ano-exibido").textContent = `${anoBaseSeletorAno} - ${anoBaseSeletorAno + ANOS_POR_PAGINA_SELETOR - 1}`;
+    $("#seletor-mes-ano-grade").innerHTML = Array.from({ length: ANOS_POR_PAGINA_SELETOR }, (_, i) => anoBaseSeletorAno + i)
+      .map((ano) => {
+        const selecionado = ano === anoExibidoSeletorMesAno;
+        const atual = ano === hoje.getFullYear();
+        const classe = selecionado ? " mes-selecionado" : atual ? " mes-atual" : "";
+        return `<button type="button" class="seletor-mes-botao${classe}" data-ano="${ano}">${ano}</button>`;
+      })
+      .join("");
+    $("#seletor-mes-ano-grade").querySelectorAll(".seletor-mes-botao").forEach((btn) => {
+      btn.onclick = () => escolherAnoSeletor(Number(btn.dataset.ano));
+    });
+    return;
+  }
   $("#seletor-mes-ano-ano-exibido").textContent = String(anoExibidoSeletorMesAno);
   const [anoSelecionado, mesSelecionado] = filtroMesAnoListas.split("-").map(Number);
-  const hoje = new Date();
   $("#seletor-mes-ano-grade").innerHTML = NOMES_MESES_FILTRO.map((nome, idx) => {
     const mes = idx + 1;
     const selecionado = anoExibidoSeletorMesAno === anoSelecionado && mes === mesSelecionado;
@@ -952,6 +984,7 @@ function renderGradeSeletorMesAno() {
 }
 function abrirSeletorMesAno() {
   anoExibidoSeletorMesAno = Number(filtroMesAnoListas.split("-")[0]);
+  modoSeletorAno = false;
   renderGradeSeletorMesAno();
   $("#overlay-seletor-mes-ano").classList.remove("hidden");
 }
@@ -3396,8 +3429,17 @@ function ligarEventos() {
   aplicarFiltroMesAtualListas();
   $("#btn-abrir-seletor-mes-ano").onclick = abrirSeletorMesAno;
   $("#overlay-seletor-mes-ano").addEventListener("click", (e) => { if (e.target.id === "overlay-seletor-mes-ano") fecharSeletorMesAno(); });
-  $("#btn-seletor-ano-anterior").onclick = () => { anoExibidoSeletorMesAno--; renderGradeSeletorMesAno(); };
-  $("#btn-seletor-ano-proximo").onclick = () => { anoExibidoSeletorMesAno++; renderGradeSeletorMesAno(); };
+  $("#btn-seletor-ano-anterior").onclick = () => {
+    if (modoSeletorAno) anoBaseSeletorAno -= ANOS_POR_PAGINA_SELETOR;
+    else anoExibidoSeletorMesAno--;
+    renderGradeSeletorMesAno();
+  };
+  $("#btn-seletor-ano-proximo").onclick = () => {
+    if (modoSeletorAno) anoBaseSeletorAno += ANOS_POR_PAGINA_SELETOR;
+    else anoExibidoSeletorMesAno++;
+    renderGradeSeletorMesAno();
+  };
+  $("#seletor-mes-ano-ano-exibido").onclick = alternarModoAnoSeletor;
   $("#btn-seletor-mes-ano-este-mes").onclick = () => {
     const agora = new Date();
     escolherMesAnoListas(agora.getMonth() + 1, agora.getFullYear());
