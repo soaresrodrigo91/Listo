@@ -3036,8 +3036,10 @@ function irParaTela(nome) {
   $("#topbar-titulo").textContent = TITULOS_TELA_PRINCIPAL[nome] ?? "";
   $("#btn-menu").classList.remove("modo-voltar");
   // O histórico de preços muda com frequência (toda compra confirmada) sem que grupos/locais/
-  // itens mudem — por isso este dashboard precisa recalcular também ao simplesmente abrir a tela.
+  // itens mudem — por isso esses dois precisam recalcular também ao simplesmente abrir a tela
+  // (senão mostram o valor de quando a tela foi renderizada pela última vez, não o atual).
   if (nome === "inicio") renderLocaisMaisBaratos();
+  if (nome === "cadastro-itens") renderCadastroItens();
   // O filtro de mês da tela "Listas de Compras" nunca persiste de uma visita pra outra — sempre
   // volta a abrir no mês atual.
   if (nome === "listas") {
