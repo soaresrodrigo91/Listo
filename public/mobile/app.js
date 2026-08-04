@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
-  query, where, serverTimestamp, writeBatch, increment, arrayUnion, waitForPendingWrites,
+  query, where, serverTimestamp, writeBatch, arrayUnion, waitForPendingWrites,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Projeto Firebase PRÓPRIO deste app — nunca o mesmo projeto/banco do Controle Financeiro.
@@ -22,6 +22,16 @@ const FIREBASE_CONFIG = {
 function hojeISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function mesAnoAtual() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+// "YYYY-MM" de um Timestamp do Firestore, no fuso local — mesmo formato do <input type="month">.
+function mesAnoDoTimestamp(timestamp) {
+  if (!timestamp?.toDate) return null;
+  const d = timestamp.toDate();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 function formatarDataBR(dataISO) {
   if (!dataISO) return "—";
@@ -146,8 +156,7 @@ function nomeExibicaoUsuario() {
 }
 // Máscara de moeda "cifrão + centavos deslizantes": cada dígito digitado empurra os centavos,
 // sempre reconstruindo a partir dos dígitos brutos (evita o cursor entrar em estados inválidos).
-function ligarMascaraMoeda(seletor) {
-  const input = $(seletor);
+function aplicarMascaraMoeda(input) {
   input.addEventListener("input", (e) => {
     const digitos = e.target.value.replace(/\D/g, "");
     e.target.value = digitos ? formatarMoeda(Number(digitos) / 100) : "";
@@ -156,6 +165,9 @@ function ligarMascaraMoeda(seletor) {
   // sem selecionar tudo ao focar, digitar por cima só empurra os centavos junto com os dígitos
   // antigos em vez de substituir, resultando num valor errado misturando os dois.
   input.addEventListener("focus", () => input.select());
+}
+function ligarMascaraMoeda(seletor) {
+  aplicarMascaraMoeda($(seletor));
 }
 // Campos <input type="number"> de quantidade: o navegador já bloqueia letras, mas ainda deixa
 // digitar "e"/"+"/"-" (notação científica/sinal) — bloqueia essas teclas também.
@@ -212,6 +224,7 @@ async function aplicarAbreviacoesPadraoUnidades() {
 const ICONE_CALENDARIO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/></svg>';
 const ICONE_SITE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 4 5.7 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.7-4-9s1.5-6.5 4-9Z"/></svg>';
 const ICONE_PESSOA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>';
+const ICONE_LOCAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><path d="M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
 // SVG em vez de emoji: emoji tem cor própria e ignora a cor de fundo do botão (fica sempre com
 // as mesmas cores do sistema), enquanto o SVG com stroke="currentColor" acompanha o azul do fab.
 const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
@@ -235,6 +248,9 @@ let notificacoesAtuais = [];
 let listaAbertaId = null;
 let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
+// Último valor considerado (cadastro/último comprado/mais barato) pro item aberto no modal de
+// comprar — usado só pra comparar ao vivo com o que a pessoa digita em "Valor pago".
+let valorReferenciaModalComprar = 0;
 let ultimoLocalUsadoId = null;
 let localMaisUsadoId = null;
 let telaAnterior = "inicio";
@@ -654,7 +670,12 @@ function preencherSelectsDeLocal() {
   $("#mc-local").innerHTML = opcoes;
 }
 function preencherSelectFormaPagamento() {
-  $("#fin-forma").innerHTML = formasAtuais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join("");
+  // A tela de finalizar renderiza o <select> de cada forma de pagamento dinamicamente
+  // (renderPagamentosFinalizar), direto a partir de formasAtuais — só precisa atualizar as
+  // linhas já desenhadas se o modal estiver aberto no momento em que a lista de formas mudar.
+  if (!$("#overlay-finalizar").classList.contains("hidden")) {
+    renderPagamentosFinalizar();
+  }
 }
 // Nenhuma sugestão aparece até o usuário digitar — nada vem pré-selecionado, diferente de um
 // <select> nativo (que sempre mostra/seleciona a primeira opção por padrão).
@@ -743,15 +764,17 @@ function renderDashboard() {
 
   getDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral")).then((snap) => {
     const geral = snap.exists() ? snap.data() : {};
-    renderRankingDashboard("#dash-itens-mais", geral.itens || {}, (id) => itensAtuais.find((i) => i.id === id)?.nome || id);
-    renderRankingDashboard("#dash-grupos-mais", geral.grupos || {}, (nome) => nome, "#dash-barra-grupos");
-    renderRankingDashboard("#dash-locais-mais", geral.locais || {}, (id) => locaisAtuais.find((l) => l.id === id)?.nome || id);
+    const totalCompras = geral.totalComprasFinalizadas || 0;
+    renderRankingDashboard("#dash-itens-mais", geral.itens || {}, (id) => itensAtuais.find((i) => i.id === id)?.nome || id, undefined, totalCompras, geral.ultimaCompraItens || {});
+    renderRankingDashboard("#dash-grupos-mais", geral.grupos || {}, (nome) => nome, "#dash-barra-grupos", totalCompras, geral.ultimaCompraGrupos || {});
+    renderRankingDashboard("#dash-locais-mais", geral.locais || {}, (id) => locaisAtuais.find((l) => l.id === id)?.nome || id, undefined, totalCompras);
   }).catch(() => {});
 }
 
 // Carrossel de listas pendentes no card "Lembrete de Compras": arrastando entre as listas, o
-// card "Itens pendentes" acompanha qual delas está visível no momento. Uma lista some do
-// carrossel assim que vira "comprada" (deixa de fazer parte de `pendentes`, vindo de fora).
+// card "Itens pendentes" acompanha qual delas está visível no momento. Uma lista só some do
+// carrossel quando é finalizada de verdade (filtro em `pendentes`, vindo de fora) — com todos os
+// itens já marcados mas ainda sem finalizar, ela continua aqui, só que com o card laranja.
 function renderCarrosselProximaCompra(pendentes) {
   const ordenadas = [...pendentes].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   const carrossel = $("#mini-carrossel-proxima");
@@ -762,7 +785,7 @@ function renderCarrosselProximaCompra(pendentes) {
     pontos.innerHTML = "";
     delete carrossel.dataset.idSelecionado;
     $("#dash-itens-pendentes").textContent = "0";
-    $("#card-lista-proxima").classList.remove("status-pendente", "status-parcial");
+    $("#card-lista-proxima").classList.remove("status-pendente", "status-aguardando-finalizacao");
     return;
   }
 
@@ -777,13 +800,14 @@ function renderCarrosselProximaCompra(pendentes) {
     $("#dash-itens-pendentes").textContent = String(Math.max((lista.qtdItens || 0) - (lista.qtdComprados || 0), 0));
     pontos.querySelectorAll("span").forEach((s, i) => s.classList.toggle("ativo", i === idx));
     carrossel.dataset.idSelecionado = lista.id;
-    // Lista recém-criada, ainda sem nenhum item, tecnicamente já nasce com status "pendente" —
-    // mas não tem nada pendente de verdade ainda, então fica na cor neutra (azul) até ganhar
-    // o primeiro item.
+    // Cor unificada com o badge da tela de Listas: azul só quando vazia (lista recém-criada,
+    // sem nenhum item ainda), vermelha quando existe QUALQUER item ainda não comprado (pendente
+    // ou parcial contam igual), laranja quando tudo já foi comprado mas ainda falta finalizar
+    // (a lista só sai daqui quando finalizada de verdade — ver filtro de `pendentes`).
     const status = lista.status || "pendente";
     const temItens = (lista.qtdItens || 0) > 0;
-    $("#card-lista-proxima").classList.toggle("status-pendente", status === "pendente" && temItens);
-    $("#card-lista-proxima").classList.toggle("status-parcial", status === "parcial");
+    $("#card-lista-proxima").classList.toggle("status-pendente", temItens && status !== "comprada");
+    $("#card-lista-proxima").classList.toggle("status-aguardando-finalizacao", status === "comprada");
   }
 
   let timeoutScrollProxima = null;
@@ -795,10 +819,26 @@ function renderCarrosselProximaCompra(pendentes) {
 }
 
 const CORES_RANKING = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea", "#0891b2"];
-function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra) {
-  const entradas = Object.entries(mapa).sort((a, b) => b[1] - a[1]).slice(0, 5);
+// "minimoCompras" (opcional): com só 1 compra finalizada, todo item/local contaria como "1
+// ocorrência" — não é um ranking de verdade ainda, então fica vazio até haver mais de uma compra
+// pra comparar. Usado em itens/locais (contados por ocorrência); grupos (contado por
+// quantidade) não precisa disso, já é comparável desde a 1ª compra.
+// "ultimaCompraMap" desempata quando duas chaves têm a mesma contagem: a comprada mais
+// recentemente aparece primeiro, em vez de ficar na ordem arbitrária que o Firestore devolve.
+function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra, minimoCompras = Infinity, ultimaCompraMap = {}) {
+  const entradas = Object.entries(mapa)
+    .sort((a, b) => (b[1] - a[1]) || (ultimaCompraMap[b[0]] || "").localeCompare(ultimaCompraMap[a[0]] || ""))
+    .slice(0, 5);
   const total = entradas.reduce((s, [, v]) => s + v, 0);
   const container = $(seletorLista);
+  // Mensagem específica pro caso mais comum de "vazio" aqui — só existe 1 compra finalizada (ou
+  // nenhuma), então ainda não há o que comparar. Sempre mostrada nesse caso, independente do mapa
+  // já ter alguma entrada ou não, pra não sobrar ambiguidade sobre o motivo de estar vazio.
+  if (minimoCompras < 2) {
+    container.innerHTML = `<div class="dash-vazio">Finalize pelo menos mais uma compra — esse ranking só aparece depois de 2 compras pra comparar.</div>`;
+    if (seletorBarra) $(seletorBarra).innerHTML = "";
+    return;
+  }
   if (entradas.length === 0) {
     container.innerHTML = `<div class="dash-vazio">Ainda sem dados — marque itens como comprados para ver aqui.</div>`;
     if (seletorBarra) $(seletorBarra).innerHTML = "";
@@ -823,33 +863,81 @@ function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra) 
 }
 
 /* ---------- carrossel de listas ---------- */
+// Filtro de mês/ano da tela "Listas de Compras" — sempre abre no mês atual (resetado em
+// irParaTela) e nunca persiste entre visitas à tela. Dois <select> em vez de <input type="month">
+// porque o input nativo tem suporte inconsistente entre navegadores (Firefox, por exemplo, não
+// implementa o picker — cai num texto simples onde não dá pra trocar o ano direito).
+const NOMES_MESES_FILTRO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+let filtroMesAnoListas = mesAnoAtual();
+function popularFiltroMesAnoListas() {
+  $("#filtro-mes-listas").innerHTML = NOMES_MESES_FILTRO.map((nome, idx) => `<option value="${idx + 1}">${nome}</option>`).join("");
+  const anoAtual = new Date().getFullYear();
+  const anos = [];
+  for (let a = anoAtual + 1; a >= anoAtual - 5; a--) anos.push(a);
+  $("#filtro-ano-listas").innerHTML = anos.map((a) => `<option value="${a}">${a}</option>`).join("");
+}
+function aplicarFiltroMesAtualListas() {
+  const agora = new Date();
+  $("#filtro-mes-listas").value = String(agora.getMonth() + 1);
+  $("#filtro-ano-listas").value = String(agora.getFullYear());
+  filtroMesAnoListas = mesAnoAtual();
+}
+// Lê os dois <select> (não o valor nativo de um <input type="month">) pra montar a mesma string
+// "YYYY-MM" usada na comparação com mesAnoDoTimestamp.
+function lerFiltroMesAnoListasDosSelects() {
+  const mes = $("#filtro-mes-listas").value.padStart(2, "0");
+  const ano = $("#filtro-ano-listas").value;
+  filtroMesAnoListas = `${ano}-${mes}`;
+}
 function renderCarrosselListas() {
   const container = $("#carrossel-listas");
   if (listasAtuais.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista ainda. Toque em “+” para criar a primeira.</div>`;
     return;
   }
-  const ordenadas = [...listasAtuais].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
+  // Cada lista é filtrada pela data que faz mais sentido pra ela: "finalizadaEm" (quando a
+  // compra de fato aconteceu) se já tiver sido finalizada, senão "criadoEm" (ainda em andamento).
+  const doMes = listasAtuais.filter((l) => mesAnoDoTimestamp(l.finalizadaEm ?? l.criadoEm) === filtroMesAnoListas);
+  if (doMes.length === 0) {
+    container.innerHTML = `<div class="vazio">Nenhuma lista nesse mês.</div>`;
+    return;
+  }
+  const ordenadas = [...doMes].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
   container.innerHTML = ordenadas
     .map((l) => {
       const status = l.status || "pendente";
       const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
-      // Lista recém-criada, sem nenhum item ainda, nasce com status "pendente" — mas não tem
-      // nada pendente de verdade, então fica neutra em vez de vermelha até ganhar o 1º item.
-      const classeVisual = (l.qtdItens || 0) === 0 ? "vazia" : status;
+      // Cor unificada com o card "Lembrete de Compras" da tela inicial: azul só quando vazia
+      // (lista recém-criada, sem nenhum item ainda), vermelha quando existe QUALQUER item ainda
+      // não comprado (pendente ou parcial contam igual), laranja quando tudo já foi comprado mas
+      // ainda falta finalizar, e verde só depois de finalizada de fato (confirmarFinalizar) —
+      // pra não parecer concluída antes da hora.
+      const classeVisual = (l.qtdItens || 0) === 0
+        ? "vazia"
+        : status === "comprada"
+          ? (l.finalizadaEm ? "comprada" : "aguardando-finalizacao")
+          : "pendente";
       const comprados = l.qtdComprados || 0;
       const pendentes = Math.max((l.qtdItens || 0) - comprados, 0);
-      // Concluída: mostra provisionado x real e a diferença, pra saber na hora se a compra saiu
-      // mais cara ou mais barata do que o estimado — vermelho passou do previsto, verde economizou.
-      const diferenca = (l.valorTotalPago || 0) - (l.valorProvisionadoTotal || 0);
+      // Concluída: mostra provisionado (o esperado ORIGINAL de cada item, congelado no momento em
+      // que entrou na lista — não muda mesmo que o item seja comprado por outro preço) x real (já
+      // com desconto aplicado) e a diferença entre os dois — vermelho passou do previsto, verde
+      // economizou. Ex.: item lançado a R$10 e comprado por R$20 aparece como +R$10, não como o
+      // desconto do fechamento da compra (esse já está embutido no "Real").
+      const provisionadoOriginal = l.valorProvisionadoOriginalTotal ?? l.valorProvisionadoTotal ?? 0;
+      const diferenca = (l.valorTotalPago || 0) - provisionadoOriginal;
       const corDiferenca = diferenca > 0 ? "var(--status-vermelho)" : diferenca < 0 ? "var(--status-verde)" : "var(--muted)";
       const comparativo = status === "comprada" && l.valorTotalPago != null
         ? `<div class="card-lista-comparativo">
-            <span>Provisionado: ${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
+            <span>Provisionado: ${formatarMoeda(provisionadoOriginal)}</span>
             <span>Real: ${formatarMoeda(l.valorTotalPago || 0)}</span>
             <span style="color:${corDiferenca}">Diferença: ${diferenca > 0 ? "+" : ""}${formatarMoeda(diferenca)}</span>
           </div>`
         : "";
+      // O total no topo do card acompanha o progresso da compra: enquanto não finalizada, é a
+      // soma dinâmica dos itens (provisionado + já pago); uma vez finalizada, vira o valor real
+      // final já com desconto aplicado (valorTotalPago), não a soma "crua" dos itens.
+      const valorTopo = l.finalizadaEm ? (l.valorTotalPago ?? l.valorProvisionadoTotal ?? 0) : (l.valorProvisionadoTotal || 0);
       return `<div class="card-lista status-${classeVisual}" data-id="${l.id}">
         <div class="card-lista-topo">
           <div>
@@ -861,10 +949,10 @@ function renderCarrosselListas() {
         </div>
         <div class="card-lista-rodape">
           <span>${l.qtdItens || 0} Item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
-          <span class="valor">${formatarMoeda(l.valorProvisionadoTotal || 0)}</span>
+          <span class="valor">${formatarMoeda(valorTopo)}</span>
         </div>
         <div class="card-lista-resumo-itens">
-          <span>✅ ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
+          <span><span class="icone-comprado">✓</span> ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
           <span><span class="icone-pendente">×</span> ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
           <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
         </div>
@@ -899,6 +987,9 @@ function abrirFormEditarLista(lista) {
   $("#fn-nome").value = lista.nome;
   $("#fn-observacoes").value = lista.observacoes || "";
   $("#btn-excluir-lista").classList.remove("hidden");
+  // "Reabrir" também fica acessível aqui (não só no rodapé da tela de detalhe) — é o lugar mais
+  // intuitivo pra quem já finalizou a compra e quer desfazer, mesmo já estando na tela de editar.
+  $("#btn-reabrir-lista-editar").classList.toggle("hidden", !lista.finalizadaEm);
   mostrarMsg("#msg-form-lista", "", "");
   mostrarTelaCheia("form-lista", "Editar lista");
 }
@@ -930,7 +1021,7 @@ async function salvarLista() {
         nome, observacoes, permanente,
         status: "pendente", qtdItens: 0, qtdComprados: 0, valorProvisionadoTotal: 0,
         criadoPor: usuario.uid, criadoEm: serverTimestamp(),
-        finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
+        finalizadaEm: null, pagamentos: null, valorTotalPago: null, desconto: null,
       });
       notificarMembrosEspaco(`${nomeExibicaoUsuario()} criou a lista "${nome}".`);
     }
@@ -941,24 +1032,83 @@ async function salvarLista() {
   }
   $("#btn-salvar-lista").disabled = false;
 }
-// Desfaz os increments de "itens/grupos/locais mais usados" (estatisticas/geral) somados na
-// finalização — usado ao excluir ou reabrir uma lista já finalizada, senão o contador do
-// dashboard nunca desce mesmo depois da compra deixar de valer.
-async function desfazerEstatisticasFinalizacao(itensDaLista) {
-  const comprados = itensDaLista.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
-  if (comprados.length === 0) return;
+// Recomputa "estatisticas/geral" (itens/grupos/locais mais usados) E o total provisionado de
+// cada lista finalizada, sempre do ZERO a partir das listas realmente finalizadas agora — nunca
+// por increment/decrement. Chamado depois de qualquer evento que muda quais listas contam como
+// finalizadas (finalizar, reabrir, excluir): incrementar na finalização e tentar decrementar de
+// volta ao reabrir/excluir é frágil — qualquer mudança futura na fórmula de contagem (como já
+// aconteceu aqui) deixa o incremento e o decremento fora de sincronia pra sempre, e o painel
+// nunca mais volta a bater. Recalcular do zero a cada evento elimina esse tipo de drift de vez.
+// Nunca deixa uma falha no recálculo travar o resto do fluxo (fechar modal, aviso de sucesso) —
+// finalizar/reabrir/excluir a lista em si já terminou com sucesso quando isso é chamado; os
+// dashboards são um "extra" que pode falhar sem invalidar a ação principal. Mostra o erro tanto
+// no console quanto num alerta visível, pra dar pra diagnosticar sem precisar abrir o DevTools.
+async function recomputarEstatisticasSeguro(contexto) {
+  try {
+    await recomputarEstatisticasELista();
+  } catch (e) {
+    console.error(`Falha ao recalcular estatísticas (${contexto}):`, e);
+    alert(`Não foi possível atualizar os dashboards agora (${contexto}). Os dados da lista foram salvos normalmente. Detalhe do erro: ${e?.message || e}`);
+  }
+}
+async function recomputarEstatisticasELista() {
+  const snapListas = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas"));
+  const finalizadas = snapListas.docs.map((d) => ({ id: d.id, ...d.data() })).filter((l) => l.finalizadaEm);
   const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
-  comprados.forEach((i) => {
-    contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) - 1;
-    const grupo = i.grupoNome || "Outros";
-    contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) - 1;
-    contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) - 1;
-  });
+  // Data da compra mais recente de cada item/grupo — desempata o ranking quando duas chaves têm
+  // a mesma contagem (sem isso, o empate ficava na ordem meio arbitrária em que o Firestore
+  // devolve os documentos, sem nenhum critério visível pra quem está olhando o dashboard).
+  const ultimaCompraItens = {}, ultimaCompraGrupos = {};
+  const atualizacoesPorLista = [];
+  for (const lista of finalizadas) {
+    const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
+    const todosItens = snap.docs.map((d) => d.data());
+    const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
+    // Itens, grupos e locais: todos por ocorrência (1 por compra em que apareceu) — não deixa
+    // algo comprado em grande quantidade, mas raramente, dominar o ranking de frequência.
+    comprados.forEach((i) => {
+      const dataCompra = i.compradoEm || "";
+      contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) + 1;
+      if (dataCompra > (ultimaCompraItens[i.itemId] || "")) ultimaCompraItens[i.itemId] = dataCompra;
+      contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) + 1;
+      const grupo = i.grupoNome || "Outros";
+      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + 1;
+      if (dataCompra > (ultimaCompraGrupos[grupo] || "")) ultimaCompraGrupos[grupo] = dataCompra;
+    });
+    // Também corrige o "Provisionado" dessa lista (usado na "Diferença" do resumo) — itens
+    // lançados antes de "subtotalProvisionado" existir têm o valor original reconstruído aqui.
+    const qtdItens = somaQuantidades(todosItens);
+    const qtdComprados = somaQuantidades(todosItens.filter((i) => i.comprado));
+    const valorProvisionadoTotal = todosItens.reduce((s, i) => s + (i.subtotal || 0), 0);
+    const valorProvisionadoOriginalTotal = todosItens.reduce((s, i) => s + (i.subtotalProvisionado ?? (i.quantidade || 0) * (i.valorProvisionado || 0)), 0);
+    const status = qtdComprados === 0 ? "pendente" : qtdComprados === qtdItens && qtdItens > 0 ? "comprada" : "parcial";
+    atualizacoesPorLista.push({ id: lista.id, dados: { qtdItens, qtdComprados, valorProvisionadoTotal, valorProvisionadoOriginalTotal, status } });
+  }
+  // Grava o agregado ANTES de atualizar cada lista (abaixo) — cada updateDoc de lista dispara o
+  // listener da coleção "listas", que chama renderDashboard() de novo por conta própria; se o
+  // agregado ainda não estivesse pronto nesse momento, esse render concorrente podia ler
+  // "estatisticas/geral" desatualizado e sobrescrever a tela com dados velhos/vazios por cima do
+  // resultado certo. Gravando primeiro, qualquer render (o meu ou o do listener) já lê o final.
   await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-    itens: Object.fromEntries(Object.entries(contagemItens).map(([k, v]) => [k, increment(v)])),
-    grupos: Object.fromEntries(Object.entries(contagemGrupos).map(([k, v]) => [k, increment(v)])),
-    locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
-  }, { merge: true });
+    itens: contagemItens, grupos: contagemGrupos, locais: contagemLocais, totalComprasFinalizadas: finalizadas.length,
+    ultimaCompraItens, ultimaCompraGrupos,
+  });
+  for (const { id, dados } of atualizacoesPorLista) {
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", id), dados);
+  }
+  renderDashboard();
+}
+// Botão em Configurações — mesma recomputação de recomputarEstatisticasELista, só com
+// confirmação e mensagens de status na tela.
+async function recalcularEstatisticasGerais() {
+  if (!confirm("Isso vai refazer os contadores de \"mais comprados\"/\"mais utilizados\" e o total provisionado de cada lista já finalizada, do zero. Continuar?")) return;
+  mostrarMsg("#msg-recalcular-estatisticas", "Recalculando...", "");
+  try {
+    await recomputarEstatisticasELista();
+    mostrarMsg("#msg-recalcular-estatisticas", "Estatísticas e totais recalculados com sucesso!", "sucesso");
+  } catch {
+    mostrarMsg("#msg-recalcular-estatisticas", "Não foi possível recalcular. Tente novamente.", "erro");
+  }
 }
 // Apaga o histórico de preços gerado por uma lista específica (listaId), em qualquer item —
 // usado ao excluir a lista e ao reabri-la (reabrir exige finalizar de novo pra gravar o que for
@@ -980,11 +1130,12 @@ async function excluirListaAtual() {
     : "Tem certeza que deseja excluir esta lista e todos os seus itens?";
   if (!confirm(mensagem)) return;
   const itensSnap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", id, "itensLista"));
-  const itensDaLista = itensSnap.docs.map((d) => d.data());
   await Promise.all(itensSnap.docs.map((d) => deleteDoc(d.ref)));
   await apagarHistoricoDaLista(id);
-  if (lista?.finalizadaEm) await desfazerEstatisticasFinalizacao(itensDaLista);
   await deleteDoc(doc(bd, "espacos", espacoIdAtual, "listas", id));
+  // Recalcula do zero com a lista já excluída — ela some sozinha da contagem, sem precisar
+  // desfazer nada manualmente (ver recomputarEstatisticasELista).
+  if (lista?.finalizadaEm) await recomputarEstatisticasSeguro("excluir lista");
   irParaTela("listas");
 }
 
@@ -1126,6 +1277,24 @@ async function compartilharListaWhatsApp(lista) {
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
 }
 
+// Preço unitário mostrado na linha pequena (R$/kg, R$/un...): "valorPago" já é por unidade (ver
+// confirmarCompra), então depois de comprado mostra ele direto; "valorProvisionado" continua
+// guardando o estimado original (não é sobrescrito), como referência pra seta e pro que volta a
+// aparecer se o item for desmarcado como comprado.
+function valorUnitarioExibido(item) {
+  if (item.comprado && item.valorPago > 0) return item.valorPago;
+  return item.valorProvisionado || 0;
+}
+// Compara o total realmente pago (subtotal, já calculado com a quantidade real) com o que
+// estava provisionado (quantidade × valor unitário provisionado) antes da compra.
+function tendenciaValorPago(item) {
+  if (!item.comprado || !(item.valorPago > 0)) return null;
+  const previsto = Math.round((item.quantidade || 0) * (item.valorProvisionado || 0) * 100);
+  const pago = Math.round((item.subtotal || 0) * 100);
+  if (!previsto || pago === previsto) return null;
+  return pago < previsto ? "queda" : "alta";
+}
+
 function renderListaDetalhe() {
   const lista = listaAbertaAtual();
   if (!lista) return;
@@ -1154,7 +1323,7 @@ function renderListaDetalhe() {
       <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     </div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
-      <span>✅ ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
+      <span><span class="icone-comprado">✓</span> ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
     </div>`;
   $("#btn-abrir-editar-lista").onclick = () => abrirFormEditarLista(lista);
@@ -1178,8 +1347,16 @@ function renderListaDetalhe() {
       .map((i) => {
         // Itens adicionados antes de marca/descrição existirem no itensLista caem no cadastro atual.
         const catalogo = itensAtuais.find((it) => it.id === i.itemId);
+        // Texto corrido numa linha só (com "..." se não couber) em vez de span por parte — com
+        // vários pedaços (marca, descrição, descrição da unidade) o flex-wrap quebrava no meio de
+        // uma palavra a qualquer momento, inclusive separando nome e sobrenome de quem lançou.
         const partes = [i.marca ?? catalogo?.marca, i.descricao ?? catalogo?.descricao, i.descricaoUnidade ?? catalogo?.descricaoUnidade].filter(Boolean);
-        const detalhe = partes.map((p, idx) => `<span>${idx === 0 ? "" : "· "}${esc(p)}</span>`).join("");
+        const detalhe = partes.map((p) => esc(p)).join(" · ");
+        // Local e nome de quem lançou agora em linhas próprias (não mais juntos com " · ") — só
+        // existe depois que o item é marcado como comprado (é aí que o local da compra é
+        // escolhido, ver abrirModalComprar).
+        const nomeLocalCompra = i.localCompraId ? locaisAtuais.find((l) => l.id === i.localCompraId)?.nome : null;
+        const localCompra = nomeLocalCompra ? `<div class="local-compra-item">${ICONE_LOCAL}${esc(nomeLocalCompra)}</div>` : "";
         const adicionadoPor = espacoCompartilhado && i.adicionadoPorNome
           ? `<div class="adicionado-por">${ICONE_PESSOA}${esc(i.adicionadoPorNome)}</div>`
           : "";
@@ -1188,13 +1365,14 @@ function renderListaDetalhe() {
         <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
         <div class="info">
           <div class="nome">${esc(i.nome)}</div>
-          ${detalhe ? `<div class="detalhe">${detalhe}</div>` : ""}
+          ${detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : ""}
+          ${localCompra}
           ${adicionadoPor}
         </div>
         <button class="btn-qtd" data-acao="qtd" ${lista.finalizadaEm ? "disabled" : ""}>${esc(formatarQuantidadeLista(i))}</button>
         <div class="valor-linha">
-          <span class="valor-unitario">${formatarMoeda(i.valorProvisionado)}/${esc(abreviarUnidade(i.unidade))}</span>
-          <span class="valor">${formatarMoeda(i.subtotal)}</span>
+          <span class="valor-unitario">${formatarMoeda(valorUnitarioExibido(i))}/${esc(abreviarUnidade(i.unidade))}</span>
+          <span class="valor">${formatarMoeda(i.subtotal)}${setaTendenciaHtml(tendenciaValorPago(i), true)}</span>
         </div>
         ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
       </div>`;
@@ -1241,11 +1419,15 @@ function renderListaDetalhe() {
 async function reabrirLista() {
   if (!listaAbertaId) return;
   if (!confirm("Reabrir esta lista? Você poderá voltar a marcar, editar e excluir itens. Como vai precisar finalizar de novo pra gravar o que for alterado, o histórico de preços e as estatísticas dessa compra são apagados agora (voltam a existir quando a lista for finalizada de novo).")) return;
-  await desfazerEstatisticasFinalizacao(itensListaAtuais);
   await apagarHistoricoDaLista(listaAbertaId);
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
-    finalizadaEm: null, formaPagamentoId: null, parcelas: null, valorTotalPago: null,
+    finalizadaEm: null, pagamentos: null, valorTotalPago: null, desconto: null,
   });
+  // Recalcula do zero com a lista já fora da lista de finalizadas — ela some sozinha da
+  // contagem, sem precisar desfazer nada manualmente (ver recomputarEstatisticasELista). Também
+  // cobre o "Locais mais baratos" (histórico apagado acima não tem listener próprio).
+  await recomputarEstatisticasSeguro("reabrir lista");
+  renderLocaisMaisBaratos();
   exibirSucesso("Lista reaberta!");
 }
 
@@ -1277,30 +1459,65 @@ function renderOpcoesValorProvisionado() {
     };
   });
 }
+// Compara os dois registros de preço mais recentes (por data, ignorando valor zerado) pra saber
+// se o item está "subindo" ou "caindo" — a linha-semente do cadastro (data "2000-01-01") entra
+// na comparação como referência quando ainda não há 2 compras reais, então mesmo a primeira
+// compra registrada já mostra a seta em relação ao valor do cadastro.
+function tendenciaDeRegistros(registros) {
+  const comValor = registros.filter((r) => (r.valor || 0) > 0).sort((a, b) => a.data.localeCompare(b.data));
+  if (comValor.length < 2) return null;
+  const atual = comValor[comValor.length - 1].valor;
+  const anterior = comValor[comValor.length - 2].valor;
+  if (atual === anterior) return null;
+  return atual < anterior ? "queda" : "alta";
+}
 // Se nunca foi comprado (sem histórico), sempre fica em 0, independente da preferência.
 // Igual a valorProvisionadoParaItem, mas também informa de onde o valor veio (cadastro, último
-// comprado ou mais barato) e, quando vem de histórico, em qual local — usado no detalhe do item
-// pra deixar claro qual valor está sendo considerado e por quê.
+// comprado ou mais barato), quando vem de histórico em qual local, e a tendência (alta/queda) —
+// usado no detalhe do item e na tela de Itens (seta ao lado do valor).
 async function valorProvisionadoComOrigem(item) {
   const preferencia = preferenciaValorProvisionado();
-  if (preferencia === "cadastro") return { valor: item.valor || 0, origem: "cadastro", localId: null };
+  // Sempre busca o histórico (mesmo na preferência "cadastro") pois é dele que sai a tendência.
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
+  const registros = snap.docs.map((d) => d.data());
+  const tendencia = tendenciaDeRegistros(registros);
+  if (preferencia === "cadastro") return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
   // "Último comprado"/"mais barato" só valem quando já existe histórico de fato; sem nenhuma
   // compra finalizada ainda, sempre cai no valor do cadastro (ou 0, se também não tiver).
-  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-  if (snap.empty) return { valor: item.valor || 0, origem: "cadastro", localId: null };
-  const registros = snap.docs.map((d) => d.data());
+  if (snap.empty) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
   if (preferencia === "barato") {
+    // A linha-semente do cadastro participa de propósito da disputa por "mais barato" (ver
+    // comentário em confirmarFinalizar) — mas se for ela quem vence, mostra como "cadastro"
+    // mesmo (sem local), já que não é uma compra de verdade.
     const comValor = registros.filter((r) => (r.valor || 0) > 0);
-    if (!comValor.length) return { valor: item.valor || 0, origem: "cadastro", localId: null };
+    if (!comValor.length) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
     const maisBarato = comValor.reduce((min, r) => (r.valor < min.valor ? r : min));
-    return { valor: maisBarato.valor, origem: "barato", localId: maisBarato.localId || null };
+    if (maisBarato.origemCadastro) return { valor: maisBarato.valor, origem: "cadastro", localId: null, tendencia };
+    return { valor: maisBarato.valor, origem: "barato", localId: maisBarato.localId || null, tendencia };
   }
-  const maisRecente = registros.sort((a, b) => b.data.localeCompare(a.data))[0];
-  if (!maisRecente.valor) return { valor: item.valor || 0, origem: "cadastro", localId: null };
-  return { valor: maisRecente.valor, origem: "ultimo", localId: maisRecente.localId || null };
+  // "Último comprado" só conta compra de fato — a linha-semente do cadastro nunca deve aparecer
+  // como se fosse "a última compra" (ela não é uma compra real, é só o valor de cadastro
+  // guardado como referência pra tendência e pro "mais barato").
+  const comprasReais = registros.filter((r) => !r.origemCadastro);
+  if (!comprasReais.length) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  const maisRecente = comprasReais.sort((a, b) => b.data.localeCompare(a.data))[0];
+  if (!maisRecente.valor) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  return { valor: maisRecente.valor, origem: "ultimo", localId: maisRecente.localId || null, tendencia };
 }
 async function valorProvisionadoParaItem(item) {
   return (await valorProvisionadoComOrigem(item)).valor;
+}
+// Marcação da seta de tendência (▼ verde caindo, ▲ vermelha subindo) usada ao lado do valor.
+// `discreta` deixa a seta ainda menor e mais apagada — usado no card da lista de compras, onde
+// ela só compara o valor pago com o provisionado daquela compra específica.
+function setaTendenciaHtml(tendencia, discreta) {
+  const classe = `seta-tendencia${discreta ? " discreta" : ""}`;
+  const titulo = discreta
+    ? { queda: "Valor pago abaixo do provisionado", alta: "Valor pago acima do provisionado" }
+    : { queda: "Valor em queda", alta: "Valor em alta" };
+  if (tendencia === "queda") return `<span class="${classe} queda" title="${titulo.queda}">▼</span>`;
+  if (tendencia === "alta") return `<span class="${classe} alta" title="${titulo.alta}">▲</span>`;
+  return "";
 }
 
 // Avisa os demais membros do espaço compartilhado (nunca o próprio autor da ação) via o sino de notificações.
@@ -1356,7 +1573,11 @@ async function adicionarItemNaLista() {
     await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
       itemId, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
       descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
-      quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
+      // "subtotalProvisionado" congela o valor esperado no momento em que o item entra na lista
+      // (nunca é sobrescrito depois de comprado) — é contra ele que a "Diferença" do resumo da
+      // compra finalizada compara o valor realmente pago, não contra o "subtotal" (que passa a
+      // mostrar o valor pago assim que o item é marcado).
+      quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado, subtotalProvisionado: quantidade * valorProvisionado,
       comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
       adicionadoPor: usuario.uid, adicionadoPorNome,
     });
@@ -1384,9 +1605,19 @@ async function recalcularTotaisLista(listaId = listaAbertaId) {
   const itens = snap.docs.map((d) => d.data());
   const qtdItens = somaQuantidades(itens);
   const qtdComprados = somaQuantidades(itens.filter((i) => i.comprado));
+  // "valorProvisionadoTotal" é o progresso ao vivo (soma do "subtotal" de cada item — provisionado
+  // enquanto pendente, real assim que comprado). "valorProvisionadoOriginalTotal" é o valor
+  // esperado ORIGINAL, congelado por item em "subtotalProvisionado" no momento em que entrou na
+  // lista — nunca muda depois, mesmo que o item seja comprado por um preço diferente. É contra
+  // esse segundo campo que o resumo da compra finalizada compara o valor realmente pago.
   const valorProvisionadoTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
+  // Itens adicionados antes de "subtotalProvisionado" existir não têm esse campo — cair pro
+  // "subtotal" nesse caso seria errado (ele já virou o valor REAL pago assim que o item foi
+  // comprado, ver confirmarCompra). Reconstrói o valor original a partir de "valorProvisionado"
+  // (esse nunca é sobrescrito), que é exatamente a mesma conta que teria gerado o campo novo.
+  const valorProvisionadoOriginalTotal = itens.reduce((s, i) => s + (i.subtotalProvisionado ?? (i.quantidade || 0) * (i.valorProvisionado || 0)), 0);
   const status = qtdComprados === 0 ? "pendente" : qtdComprados === qtdItens && qtdItens > 0 ? "comprada" : "parcial";
-  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaId), { qtdItens, qtdComprados, valorProvisionadoTotal, status });
+  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaId), { qtdItens, qtdComprados, valorProvisionadoTotal, valorProvisionadoOriginalTotal, status });
 }
 
 /* ---------- alterar quantidade de um item na lista ---------- */
@@ -1414,7 +1645,7 @@ async function confirmarQuantidade() {
     return;
   }
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
-    quantidade, subtotal: quantidade * (item.valorProvisionado || 0),
+    quantidade, subtotal: quantidade * (item.valorProvisionado || 0), subtotalProvisionado: quantidade * (item.valorProvisionado || 0),
   });
   await recalcularTotaisLista();
   fecharModalQuantidade();
@@ -1434,36 +1665,84 @@ async function carregarLocalMaisUsado() {
     localMaisUsadoId = null;
   }
 }
-// Preço por unidade do item aberto no modal (ex.: R$/kg) — usado pra recalcular "Valor pago"
-// sempre que a quantidade realmente comprada (peso na balança) for digitada.
-let valorUnitarioModalComprar = 0;
-function recalcularValorComprarPorQuantidade() {
-  const quantidade = Number($("#mc-quantidade").value) || 0;
-  $("#mc-valor").value = valorUnitarioModalComprar ? formatarMoeda(quantidade * valorUnitarioModalComprar) : "";
+const ROTULOS_ORIGEM_VALOR = { cadastro: "Valor do cadastro", ultimo: "Último comprado", barato: "Mais barato registrado" };
+// Compara o que está sendo digitado em "Valor pago" com o último valor considerado (mostrado
+// acima) e atualiza a setinha ao vivo: verde/para baixo se ficou mais barato, vermelha/pra cima
+// se ficou mais caro — some se não há referência ainda ou o valor bate exatamente.
+function atualizarDiferencaValorComprar() {
+  const el = $("#mc-valor-diferenca");
+  if (!el) return;
+  const atual = paraNumero($("#mc-valor").value);
+  const diferenca = valorReferenciaModalComprar > 0 && atual > 0
+    ? Math.round((atual - valorReferenciaModalComprar) * 100) / 100
+    : 0;
+  if (!diferenca) {
+    el.className = "mc-valor-diferenca";
+    el.innerHTML = "";
+    return;
+  }
+  const tendencia = diferenca < 0 ? "queda" : "alta";
+  el.className = `mc-valor-diferenca ${tendencia}`;
+  el.innerHTML = `${setaTendenciaHtml(tendencia)} ${diferenca < 0 ? "−" : "+"}${formatarMoeda(Math.abs(diferenca))} em relação ao último valor`;
 }
-function abrirModalComprar(itemListaId) {
+async function abrirModalComprar(itemListaId) {
   itemListaPendenteId = itemListaId;
   const item = itensListaAtuais.find((i) => i.id === itemListaId);
+  if (!item) return;
+  valorReferenciaModalComprar = 0;
+  // Nome/marca/descrição já vêm copiados pro itensLista desde que o item foi adicionado à
+  // lista — não precisa buscar o cadastro pra mostrar esses detalhes aqui. A referência de valor
+  // (passado) fica junto desse bloco, separada dos campos "Local"/"Valor pago" (a compra atual).
+  const partes = [item.marca, item.descricao, item.descricaoUnidade].filter(Boolean);
+  const detalhe = partes.map((p) => esc(p)).join(" · ");
+  $("#mc-item-info").innerHTML =
+    `<div class="nome">${esc(item.nome)}</div>` +
+    (detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : "") +
+    `<div id="mc-valor-referencia" class="mc-valor-referencia">Buscando último valor...</div>`;
+
   // Unidades fracionáveis (kg, g, ml, l) costumam ter o peso real definido só na balança do
-  // mercado — em vez de fazer a conta de cabeça, deixa informar a quantidade e calcula sozinho.
-  const fracionavel = unidadeAceitaFracao(item?.unidade);
-  valorUnitarioModalComprar = item?.valorProvisionado || 0;
+  // mercado — em vez de fazer a conta de cabeça, deixa informar a quantidade separadamente.
+  const fracionavel = unidadeAceitaFracao(item.unidade);
   $("#campo-mc-quantidade").classList.toggle("hidden", !fracionavel);
   if (fracionavel) {
     $("#mc-unidade-label").textContent = item.unidade || "";
     $("#mc-quantidade").value = item.quantidade || "";
-    recalcularValorComprarPorQuantidade();
-  } else {
-    // Pré-preenche com o valor já provisionado pra esse item na lista — se bater com o que foi
-    // pago de verdade, só confirma; se não, edita normalmente antes de confirmar.
-    $("#mc-valor").value = item?.subtotal ? formatarMoeda(item.subtotal) : "";
   }
+  // "Valor pago" é sempre o preço por unidade (R$/kg, R$/un...), nunca o total da linha — o
+  // total (subtotal) é sempre calculado como quantidade × esse valor, em confirmarCompra.
+  // Pré-preenche com o que já estava provisionado na lista enquanto busca a origem detalhada
+  // (cadastro, último comprado ou mais barato + local) pra completar a referência acima.
+  $("#rotulo-mc-valor").textContent = `Valor pago (por ${abreviarUnidade(item.unidade)}) *`;
+  $("#mc-valor").value = item.valorProvisionado ? formatarMoeda(item.valorProvisionado) : "";
+  atualizarDiferencaValorComprar();
   // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
   // lembrando o último local escolhido (só falta informar o valor a cada item seguinte).
   const localSugerido = ultimoLocalUsadoId || localMaisUsadoId;
   if (localSugerido) $("#mc-local").value = localSugerido;
   mostrarMsg("#msg-comprar", "", "");
   $("#overlay-comprar").classList.remove("hidden");
+
+  const catalogo = itensAtuais.find((c) => c.id === item.itemId);
+  const origemValor = catalogo ? await valorProvisionadoComOrigem(catalogo) : null;
+  // Se enquanto buscava o usuário fechou o modal ou abriu o de outro item, descarta o resultado.
+  if (itemListaPendenteId !== itemListaId) return;
+  const referenciaEl = $("#mc-valor-referencia");
+  if (!origemValor) {
+    if (referenciaEl) referenciaEl.textContent = "";
+    return;
+  }
+  valorReferenciaModalComprar = origemValor.valor || 0;
+  $("#mc-valor").value = origemValor.valor ? formatarMoeda(origemValor.valor) : "";
+  atualizarDiferencaValorComprar();
+  // Sem local (preferência "cadastro" ou nenhuma compra registrada ainda), deixa explícito que o
+  // valor de referência é o do cadastro, não uma compra real num local específico. O prefixo
+  // "Último valor considerado" deixa claro que é isso que foi usado pra pré-preencher o campo
+  // acima (conforme a preferência em Configurações), não necessariamente a última compra feita.
+  const nomeLocal = origemValor.localId ? locaisAtuais.find((l) => l.id === origemValor.localId)?.nome : null;
+  const detalheOrigem = origemValor.origem === "cadastro"
+    ? "Valor do cadastro (sem local registrado)"
+    : `${ROTULOS_ORIGEM_VALOR[origemValor.origem]}${nomeLocal ? ` · ${nomeLocal}` : ""}`;
+  if (referenciaEl) referenciaEl.textContent = `Último valor considerado — ${detalheOrigem}: ${formatarMoeda(origemValor.valor)}`;
 }
 function fecharModalComprar() {
   $("#overlay-comprar").classList.add("hidden");
@@ -1471,6 +1750,8 @@ function fecharModalComprar() {
 }
 async function confirmarCompra() {
   const localId = $("#mc-local").value;
+  // "Valor pago" é sempre por unidade (mesma unidade do "R$/kg" mostrado no card) — o total da
+  // linha (subtotal) é sempre esse valor × a quantidade, nunca o valor digitado direto.
   const valorPago = paraNumero($("#mc-valor").value);
   if (!localId || valorPago <= 0) {
     mostrarMsg("#msg-comprar", "Selecione o local e informe o valor pago.", "erro");
@@ -1478,9 +1759,14 @@ async function confirmarCompra() {
   }
   const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
   if (!item) return;
+  // Em unidades fracionáveis, a quantidade real (peso na balança) pode ter sido ajustada no
+  // campo "Quantidade comprada" — usa ela pro total em vez da quantidade só estimada da lista.
+  const fracionavel = unidadeAceitaFracao(item.unidade);
+  const quantidade = fracionavel ? (Number($("#mc-quantidade").value) || item.quantidade || 0) : (item.quantidade || 0);
   ultimoLocalUsadoId = localId;
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     comprado: true, localCompraId: localId, valorPago, compradoPor: usuario.uid, compradoEm: hojeISO(),
+    subtotal: quantidade * valorPago,
   });
   // Histórico de preços e estatísticas dos dashboards só são gravados na finalização da compra
   // (confirmarFinalizar), não aqui: até lá o check é só o estado "peguei no carrinho", podendo
@@ -1492,21 +1778,154 @@ async function confirmarCompra() {
 async function desmarcarComprado(item) {
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
+    // Volta o card a mostrar o total provisionado (não o que tinha sido pago) agora que o item
+    // está pendente de novo.
+    subtotal: (item.quantidade || 0) * (item.valorProvisionado || 0),
   });
   recalcularTotaisLista();
 }
 
 /* ---------- finalizar compra ---------- */
-// Total real da compra: soma do que foi de fato pago nos itens já marcados (quantidade × valor
-// pago), nunca o valor provisionado dos itens ainda pendentes — por isso o campo é travado.
+// Total real da compra: soma do "subtotal" já calculado de cada item comprado (quantidade real ×
+// valor pago, ver confirmarCompra), nunca o valor provisionado dos itens ainda pendentes — por
+// isso o campo é travado. Usa o "subtotal" já pronto (não recalcula quantidade × valorPago aqui)
+// pra bater exatamente com o total mostrado no topo da tela da lista, que soma o mesmo campo.
 function calcularTotalItensComprados(itens) {
-  return itens.filter((i) => i.comprado).reduce((s, i) => s + (i.quantidade || 0) * (i.valorPago ?? i.valorProvisionado ?? 0), 0);
+  return itens.filter((i) => i.comprado).reduce((s, i) => s + (i.subtotal || 0), 0);
+}
+let totalItensComprasFinalizar = 0;
+let valorFinalFinalizar = 0;
+// Pagamento pode ser dividido em mais de uma forma (ex.: parte no PIX, parte no cartão de
+// crédito parcelado) — cada linha guarda sua própria forma, valor e parcelas (só relevante pra
+// Cartão de Crédito). `id` é só uma chave local pra achar a linha certa nos handlers, não é
+// salvo em lugar nenhum.
+let pagamentosFinalizar = [];
+let proximoIdPagamentoFinalizar = 1;
+function novaLinhaPagamento(formaId, valorTexto) {
+  return { id: proximoIdPagamentoFinalizar++, formaId: formaId || "", valorTexto: valorTexto || "", parcelas: 1 };
+}
+function totalAlocadoPagamentos() {
+  return pagamentosFinalizar.reduce((s, p) => s + (paraNumero(p.valorTexto) || 0), 0);
+}
+// Mostra quanto ainda falta (ou sobra) alocar entre as formas de pagamento em relação ao valor
+// final — chamado a cada edição de valor, sem re-renderizar as linhas (evita perder o foco de
+// quem está digitando).
+function atualizarRestantePagamentos() {
+  const el = $("#fin-restante-pagamentos");
+  if (!el) return;
+  const restante = Math.round((valorFinalFinalizar - totalAlocadoPagamentos()) * 100) / 100;
+  if (Math.abs(restante) < 0.005) {
+    el.className = "mc-valor-diferenca queda";
+    el.textContent = "Os valores batem com o total final.";
+    return;
+  }
+  el.className = `mc-valor-diferenca ${restante > 0 ? "alta" : "queda"}`;
+  el.textContent = restante > 0
+    ? `Falta alocar ${formatarMoeda(restante)}`
+    : `${formatarMoeda(Math.abs(restante))} a mais do que o total final`;
+}
+function renderPagamentosFinalizar() {
+  const container = $("#fin-pagamentos");
+  container.innerHTML = pagamentosFinalizar
+    .map((p) => {
+      const forma = formasAtuais.find((f) => f.id === p.formaId);
+      const ehCredito = forma?.nome === "Cartão de Crédito";
+      return `<div class="linha-pagamento" data-id="${p.id}">
+        ${pagamentosFinalizar.length > 1 ? `<button type="button" class="btn-remover-pagamento" data-id="${p.id}" aria-label="Remover esta forma de pagamento">✕</button>` : ""}
+        <div class="linha-dupla">
+          <div class="field">
+            <label>Forma de pagamento *</label>
+            <select class="pg-forma" data-id="${p.id}">
+              <option value="">Selecione...</option>
+              ${formasAtuais.map((f) => `<option value="${f.id}" ${f.id === p.formaId ? "selected" : ""}>${esc(f.nome)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label>Valor *</label>
+            <input type="text" class="pg-valor" data-id="${p.id}" inputmode="decimal" placeholder="0,00" value="${esc(p.valorTexto)}">
+          </div>
+        </div>
+        ${ehCredito ? `<div class="field">
+          <label>Parcelas</label>
+          <div class="stepper-quantidade">
+            <button type="button" class="btn-stepper pg-parcela-menos" data-id="${p.id}" aria-label="Diminuir parcelas">−</button>
+            <input type="number" class="pg-parcelas" data-id="${p.id}" min="1" step="1" value="${p.parcelas}">
+            <button type="button" class="btn-stepper pg-parcela-mais" data-id="${p.id}" aria-label="Aumentar parcelas">+</button>
+          </div>
+        </div>` : ""}
+      </div>`;
+    })
+    .join("");
+
+  container.querySelectorAll(".pg-forma").forEach((el) => {
+    el.onchange = () => {
+      const p = pagamentosFinalizar.find((x) => x.id === Number(el.dataset.id));
+      p.formaId = el.value;
+      renderPagamentosFinalizar();
+      atualizarRestantePagamentos();
+    };
+  });
+  container.querySelectorAll(".pg-valor").forEach((el) => {
+    aplicarMascaraMoeda(el);
+    el.addEventListener("input", () => {
+      const p = pagamentosFinalizar.find((x) => x.id === Number(el.dataset.id));
+      // Trava o valor no máximo que ainda cabe (valor final menos o que já foi alocado nas
+      // outras linhas) — ex.: total R$800, já R$500 alocados em outra forma, esta linha não
+      // deixa passar de R$300, em vez de só avisar depois que a soma não bate.
+      const alocadoNasOutras = pagamentosFinalizar
+        .filter((x) => x.id !== p.id)
+        .reduce((s, x) => s + (paraNumero(x.valorTexto) || 0), 0);
+      const maximoPermitido = Math.max(Math.round((valorFinalFinalizar - alocadoNasOutras) * 100) / 100, 0);
+      const digitado = paraNumero(el.value) || 0;
+      if (digitado > maximoPermitido + 0.001) {
+        el.value = maximoPermitido > 0 ? formatarMoeda(maximoPermitido) : "";
+      }
+      p.valorTexto = el.value;
+      atualizarRestantePagamentos();
+    });
+  });
+  container.querySelectorAll(".pg-parcelas").forEach((el) => {
+    el.addEventListener("keydown", (e) => { if (["e", "E", "+", "-"].includes(e.key)) e.preventDefault(); });
+    el.addEventListener("input", () => {
+      const p = pagamentosFinalizar.find((x) => x.id === Number(el.dataset.id));
+      p.parcelas = Math.max(1, Number(el.value) || 1);
+    });
+  });
+  container.querySelectorAll(".pg-parcela-menos, .pg-parcela-mais").forEach((btn) => {
+    btn.onclick = () => {
+      const p = pagamentosFinalizar.find((x) => x.id === Number(btn.dataset.id));
+      p.parcelas = Math.max(1, p.parcelas + (btn.classList.contains("pg-parcela-mais") ? 1 : -1));
+      const input = container.querySelector(`.pg-parcelas[data-id="${btn.dataset.id}"]`);
+      if (input) input.value = p.parcelas;
+    };
+  });
+  container.querySelectorAll(".btn-remover-pagamento").forEach((btn) => {
+    btn.onclick = () => {
+      pagamentosFinalizar = pagamentosFinalizar.filter((x) => x.id !== Number(btn.dataset.id));
+      renderPagamentosFinalizar();
+      atualizarRestantePagamentos();
+    };
+  });
+}
+// Desconto abate do total dos itens comprados — nunca deixa o valor final ficar negativo.
+function atualizarValorFinalFinalizar() {
+  const desconto = Math.min(Math.max(paraNumero($("#fin-desconto").value), 0), totalItensComprasFinalizar);
+  valorFinalFinalizar = Math.round((totalItensComprasFinalizar - desconto) * 100) / 100;
+  $("#fin-valor-final").value = formatarMoeda(valorFinalFinalizar);
+  atualizarRestantePagamentos();
 }
 function abrirModalFinalizar() {
-  $("#fin-parcelas").value = "1";
-  $("#fin-parcelas-wrap").classList.add("hidden");
   const lista = listaAbertaAtual();
-  $("#fin-valor-total").value = formatarMoeda(calcularTotalItensComprados(itensListaAtuais));
+  totalItensComprasFinalizar = calcularTotalItensComprados(itensListaAtuais);
+  $("#fin-valor-total").value = formatarMoeda(totalItensComprasFinalizar);
+  $("#fin-desconto").value = "";
+  valorFinalFinalizar = totalItensComprasFinalizar;
+  $("#fin-valor-final").value = formatarMoeda(valorFinalFinalizar);
+  // Começa com uma única linha já preenchida com o valor final — quem só usa uma forma de
+  // pagamento (o caso mais comum) não precisa mexer em nada além de escolher a forma.
+  pagamentosFinalizar = [novaLinhaPagamento("", valorFinalFinalizar ? formatarMoeda(valorFinalFinalizar) : "")];
+  renderPagamentosFinalizar();
+  atualizarRestantePagamentos();
   mostrarMsg("#msg-finalizar", "", "");
   const pendentes = lista ? lista.qtdItens - lista.qtdComprados : 0;
   mostrarMsg(
@@ -1520,23 +1939,41 @@ function fecharModalFinalizar() {
   $("#overlay-finalizar").classList.add("hidden");
 }
 async function confirmarFinalizar() {
-  const formaId = $("#fin-forma").value;
-  if (!formaId) {
-    mostrarMsg("#msg-finalizar", "Selecione a forma de pagamento.", "erro");
+  if (pagamentosFinalizar.some((p) => !p.formaId)) {
+    mostrarMsg("#msg-finalizar", "Selecione a forma de pagamento em todas as linhas.", "erro");
+    return;
+  }
+  if (pagamentosFinalizar.some((p) => !(paraNumero(p.valorTexto) > 0))) {
+    mostrarMsg("#msg-finalizar", "Informe um valor maior que zero em todas as formas de pagamento.", "erro");
+    return;
+  }
+  const restante = Math.round((valorFinalFinalizar - totalAlocadoPagamentos()) * 100) / 100;
+  if (Math.abs(restante) >= 0.01) {
+    mostrarMsg("#msg-finalizar", "A soma das formas de pagamento precisa bater com o valor final a pagar.", "erro");
     return;
   }
   // Grava o histórico de preços agora (não no check individual): só os itens efetivamente
   // marcados como comprados entram; os pendentes simplesmente mantêm o histórico anterior.
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"));
   const todosItens = snap.docs.map((d) => d.data());
-  const valorTotalPago = calcularTotalItensComprados(todosItens);
-  if (valorTotalPago <= 0) {
+  const totalItens = calcularTotalItensComprados(todosItens);
+  if (totalItens <= 0) {
     mostrarMsg("#msg-finalizar", "Nenhum item foi marcado como comprado ainda.", "erro");
     return;
   }
+  // Desconto é do fechamento da compra inteira (cupom, promoção do caixa...), não de um item
+  // específico — por isso só abate do total final, sem mexer no histórico de preço por item.
+  const desconto = Math.min(Math.max(paraNumero($("#fin-desconto").value), 0), totalItens);
+  const valorTotalPago = totalItens - desconto;
   if (!confirm("Deseja realmente finalizar esta compra?")) return;
-  const forma = formasAtuais.find((f) => f.id === formaId);
-  const parcelas = forma?.nome === "Cartão de Crédito" ? Number($("#fin-parcelas").value) || 1 : 1;
+  const pagamentos = pagamentosFinalizar.map((p) => {
+    const forma = formasAtuais.find((f) => f.id === p.formaId);
+    return {
+      formaPagamentoId: p.formaId,
+      valor: Math.round(paraNumero(p.valorTexto) * 100) / 100,
+      parcelas: forma?.nome === "Cartão de Crédito" ? Math.max(1, Number(p.parcelas) || 1) : 1,
+    };
+  });
   const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
   // Se esta é a primeira compra já registrada do item, preserva o valor do cadastro como um
   // registro a mais no histórico (com data bem antiga, pra nunca ser confundido com "o último
@@ -1558,25 +1995,12 @@ async function confirmarFinalizar() {
     }
     return gravacoes;
   }));
-  // Estatísticas dos dashboards (itens/grupos/locais mais usados) contam só o que foi de fato
-  // finalizado — soma as ocorrências por chave e grava um único increment por chave.
-  if (comprados.length > 0) {
-    const contagemItens = {}, contagemGrupos = {}, contagemLocais = {};
-    comprados.forEach((i) => {
-      contagemItens[i.itemId] = (contagemItens[i.itemId] || 0) + 1;
-      const grupo = i.grupoNome || "Outros";
-      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + 1;
-      contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) + 1;
-    });
-    await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-      itens: Object.fromEntries(Object.entries(contagemItens).map(([k, v]) => [k, increment(v)])),
-      grupos: Object.fromEntries(Object.entries(contagemGrupos).map(([k, v]) => [k, increment(v)])),
-      locais: Object.fromEntries(Object.entries(contagemLocais).map(([k, v]) => [k, increment(v)])),
-    }, { merge: true });
-  }
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId), {
-    finalizadaEm: serverTimestamp(), formaPagamentoId: formaId, parcelas, valorTotalPago,
+    finalizadaEm: serverTimestamp(), pagamentos, valorTotalPago, desconto,
   });
+  // Recalcula "estatisticas/geral" e o provisionado de cada lista finalizada do zero (nunca por
+  // increment) — ver recomputarEstatisticasELista.
+  await recomputarEstatisticasSeguro("finalizar compra");
   fecharModalFinalizar();
   exibirSucesso("Compra finalizada!");
   irParaTela("listas");
@@ -1605,17 +2029,18 @@ async function renderCadastroItens() {
   }
   // Mesma regra de preferência (Configurações) usada ao adicionar o item numa lista: valor do
   // cadastro, último valor comprado ou o mais barato — sem histórico, sempre cai no cadastro.
-  const valores = await Promise.all(lista.map((i) => valorProvisionadoParaItem(i)));
+  // A seta ao lado reflete a tendência do histórico de preços do item (subindo ou caindo).
+  const valores = await Promise.all(lista.map((i) => valorProvisionadoComOrigem(i)));
   container.innerHTML = lista
     .map((i, idx) => {
       const partes = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean);
-      const detalhe = partes.map((p, idx2) => `<span>${idx2 === 0 ? "" : "· "}${esc(p)}</span>`).join("");
+      const detalhe = partes.map((p) => esc(p)).join(" · ");
       return `<div class="item" data-id="${i.id}">
       <div class="info">
         <div class="nome">${esc(i.nome)}</div>
-        <div class="detalhe">${detalhe}</div>
+        <div class="detalhe detalhe-truncado">${detalhe}</div>
       </div>
-      <span class="valor">${formatarMoeda(valores[idx])}</span>
+      <span class="valor">${formatarMoeda(valores[idx].valor)}${setaTendenciaHtml(valores[idx].tendencia)}</span>
       <button class="btn-enviar-lista" data-id-enviar="${i.id}" aria-label="Enviar para lista pendente" title="Enviar para lista pendente">🛒</button>
     </div>`;
     })
@@ -1705,7 +2130,7 @@ async function confirmarEnvioParaLista() {
   await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"), {
     itemId: item.id, nome: item.nome, marca: item.marca || null, descricao: item.descricao || null,
     descricaoUnidade: item.descricaoUnidade || null, unidade: item.unidade, grupoNome: item.grupoNome || null,
-    quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado,
+    quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado, subtotalProvisionado: quantidade * valorProvisionado,
     comprado: false, localCompraId: null, valorPago: null, compradoPor: null, compradoEm: null,
     adicionadoPor: usuario.uid, adicionadoPorNome,
   });
@@ -2123,7 +2548,10 @@ async function renderLocaisMaisBaratos() {
 
   for (const item of itensAtuais) {
     const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
-    const registros = ultimosPorLocal(snap.docs.map((d) => d.data()));
+    // Exclui a linha-semente do cadastro (origemCadastro, localId null) — ela não é uma compra
+    // real num local, e contava como um "2º local" falso, fazendo a comparação aparecer já com
+    // só 1 compra de verdade (quando na real só existe 1 local pra comparar, não 2).
+    const registros = ultimosPorLocal(snap.docs.map((d) => d.data()).filter((r) => !r.origemCadastro && r.localId));
     if (registros.length < 2) continue;
     const mediaDoItem = registros.reduce((s, r) => s + r.valor, 0) / registros.length;
     if (mediaDoItem <= 0) continue;
@@ -2309,7 +2737,11 @@ async function salvarForma() {
 async function excluirFormaAtual() {
   const id = $("#ff-id").value;
   if (!id) return;
-  if (listasAtuais.some((l) => l.formaPagamentoId === id)) {
+  // "formaPagamentoId" (singular) é o esquema antigo, de antes de uma compra poder ser dividida
+  // em mais de uma forma de pagamento — mantido aqui só pra não perder a checagem em compras
+  // finalizadas antes dessa mudança.
+  const emUso = listasAtuais.some((l) => l.formaPagamentoId === id || (l.pagamentos || []).some((p) => p.formaPagamentoId === id));
+  if (emUso) {
     mostrarMsg("#msg-form-forma", "Esta forma de pagamento está vinculada a uma compra já finalizada — não é possível excluir.", "erro");
     return;
   }
@@ -2618,6 +3050,12 @@ function irParaTela(nome) {
   // O histórico de preços muda com frequência (toda compra confirmada) sem que grupos/locais/
   // itens mudem — por isso este dashboard precisa recalcular também ao simplesmente abrir a tela.
   if (nome === "inicio") renderLocaisMaisBaratos();
+  // O filtro de mês da tela "Listas de Compras" nunca persiste de uma visita pra outra — sempre
+  // volta a abrir no mês atual.
+  if (nome === "listas") {
+    aplicarFiltroMesAtualListas();
+    renderCarrosselListas();
+  }
 }
 function mostrarTelaCheia(nome, titulo) {
   TODAS_AS_TELAS.forEach((t) => $(`#tela-${t}`).classList.toggle("hidden", t !== nome));
@@ -2802,6 +3240,20 @@ function ligarEventos() {
     };
   });
   $("#fab-listas").onclick = abrirFormNovaLista;
+  popularFiltroMesAnoListas();
+  aplicarFiltroMesAtualListas();
+  $("#filtro-mes-listas").addEventListener("change", () => {
+    lerFiltroMesAnoListasDosSelects();
+    renderCarrosselListas();
+  });
+  $("#filtro-ano-listas").addEventListener("change", () => {
+    lerFiltroMesAnoListasDosSelects();
+    renderCarrosselListas();
+  });
+  $("#btn-mes-atual-listas").onclick = () => {
+    aplicarFiltroMesAtualListas();
+    renderCarrosselListas();
+  };
   $("#fab-cadastro-itens").onclick = abrirFormNovoItem;
   $("#fab-cadastro-grupos").onclick = abrirFormNovoGrupo;
   $("#fab-cadastro-locais").onclick = abrirFormNovoLocal;
@@ -2821,6 +3273,11 @@ function ligarEventos() {
   };
 
   $("#btn-salvar-lista").onclick = salvarLista;
+  $("#btn-reabrir-lista-editar").onclick = async () => {
+    const lista = listasAtuais.find((l) => l.id === $("#fn-id").value);
+    await reabrirLista();
+    if (lista) abrirListaDetalhe(lista);
+  };
   $("#btn-excluir-lista").onclick = excluirListaAtual;
   $("#btn-cancelar-lista").onclick = voltarParaTelaAnterior;
 
@@ -2855,7 +3312,6 @@ function ligarEventos() {
 
   $("#btn-confirmar-compra").onclick = confirmarCompra;
   $("#btn-cancelar-compra").onclick = fecharModalComprar;
-  $("#mc-quantidade").addEventListener("input", recalcularValorComprarPorQuantidade);
   $("#overlay-comprar").addEventListener("click", (e) => { if (e.target.id === "overlay-comprar") fecharModalComprar(); });
 
   $("#btn-confirmar-quantidade").onclick = confirmarQuantidade;
@@ -2865,10 +3321,14 @@ function ligarEventos() {
   $("#btn-confirmar-finalizar").onclick = confirmarFinalizar;
   $("#btn-cancelar-finalizar").onclick = fecharModalFinalizar;
   $("#overlay-finalizar").addEventListener("click", (e) => { if (e.target.id === "overlay-finalizar") fecharModalFinalizar(); });
-  $("#fin-forma").addEventListener("change", () => {
-    const forma = formasAtuais.find((f) => f.id === $("#fin-forma").value);
-    $("#fin-parcelas-wrap").classList.toggle("hidden", forma?.nome !== "Cartão de Crédito");
-  });
+  $("#btn-add-pagamento").onclick = () => {
+    // Já sugere o restante a alocar como valor da nova linha — ex.: total R$800, R$500 já
+    // preenchidos na primeira forma, a segunda já nasce com R$300 em vez de vazia.
+    const restante = Math.max(Math.round((valorFinalFinalizar - totalAlocadoPagamentos()) * 100) / 100, 0);
+    pagamentosFinalizar.push(novaLinhaPagamento("", restante > 0 ? formatarMoeda(restante) : ""));
+    renderPagamentosFinalizar();
+    atualizarRestantePagamentos();
+  };
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.onclick = () => {
@@ -2940,9 +3400,12 @@ function ligarEventos() {
     try { localStorage.setItem("temaEscuro", String(escuro)); } catch {}
     aplicarTema(escuro);
   };
+  $("#btn-recalcular-estatisticas").onclick = recalcularEstatisticasGerais;
 
-  ["#mc-valor", "#fi-valor"].forEach(ligarMascaraMoeda);
-  ["#ld-quantidade", "#fin-parcelas"].forEach(bloquearCaracteresInvalidosNumero);
+  ["#mc-valor", "#fi-valor", "#fin-desconto"].forEach(ligarMascaraMoeda);
+  $("#mc-valor").addEventListener("input", atualizarDiferencaValorComprar);
+  $("#fin-desconto").addEventListener("input", atualizarValorFinalFinalizar);
+  ["#ld-quantidade"].forEach(bloquearCaracteresInvalidosNumero);
   ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
   // Botões "−"/"+" dos campos de quantidade: sempre andam de 1 em 1 (mesmo em unidade
   // fracionável, ex.: kg) — decimais só entram digitando manualmente no campo. Um passo por

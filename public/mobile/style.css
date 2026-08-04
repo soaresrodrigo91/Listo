@@ -295,6 +295,15 @@ textarea {
   border-color: var(--danger);
   color: var(--danger);
 }
+/* Padrão de cor dos botões nas telas de editar/cadastrar: Salvar sempre azul (.btn, ação
+   principal), Cancelar sempre neutro (.btn-secundario puro, não é destrutivo), Excluir sempre
+   vermelho (.btn-cancelar, ação destrutiva) e ações especiais reversíveis (como "Reabrir lista")
+   em âmbar — nem neutras demais, nem soam como perigo. */
+.btn-reabrir {
+  background: color-mix(in srgb, var(--status-amber) 10%, transparent);
+  border-color: var(--status-amber);
+  color: var(--status-amber);
+}
 .aviso {
   margin-top: 14px;
   padding: 12px 14px;
@@ -670,6 +679,35 @@ textarea {
 #lista-detalhe-cabecalho {
   padding: 0 16px;
 }
+.filtro-mes-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 6px;
+}
+.filtro-mes-wrap select {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  appearance: none;
+}
+.filtro-mes-wrap select:focus {
+  border-color: var(--primary);
+}
+.filtro-mes-wrap .btn-secundario {
+  flex-shrink: 0;
+  width: auto;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-top: 0;
+}
 .filtros-chip {
   display: flex;
   gap: 8px;
@@ -796,6 +834,68 @@ textarea {
   border-radius: 20px;
   padding: 18px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+.mc-item-info {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+.mc-item-info .nome {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.mc-item-info .detalhe {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.mc-valor-referencia {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.mc-valor-diferenca {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 6px;
+  min-height: 14px;
+}
+.mc-valor-diferenca.queda {
+  color: var(--status-verde);
+}
+.mc-valor-diferenca.alta {
+  color: var(--status-vermelho);
+}
+.linha-pagamento {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 34px 2px 14px;
+  margin-bottom: 12px;
+  background: var(--bg-soft);
+}
+.btn-remover-pagamento {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.btn-remover-pagamento:hover {
+  color: var(--status-vermelho);
 }
 
 /* ---------- onboarding (primeiro acesso) ---------- */
@@ -992,18 +1092,19 @@ main::-webkit-scrollbar {
   color: var(--primary);
 }
 /* Card "Lista (Pendente)": a cor acompanha o status da lista visível no carrossel — vermelho
-   discreto enquanto houver algo pendente de compra (o estado mais comum do app), laranja assim
-   que a compra é iniciada mas ainda não finalizada, e azul (padrão) quando não há nada pendente. */
+   enquanto existir qualquer item ainda não comprado (pendente ou parcial contam igual), laranja
+   quando tudo já foi comprado mas ainda falta finalizar, e azul (padrão) quando não há nada
+   pendente ou a lista ainda não tem itens. */
 #card-lista-proxima.status-pendente {
   border-left-color: color-mix(in srgb, var(--status-vermelho) 55%, transparent);
 }
 #card-lista-proxima.status-pendente .rotulo-icone {
   color: var(--status-vermelho);
 }
-#card-lista-proxima.status-parcial {
+#card-lista-proxima.status-aguardando-finalizacao {
   border-left-color: color-mix(in srgb, var(--status-amber) 55%, transparent);
 }
-#card-lista-proxima.status-parcial .rotulo-icone {
+#card-lista-proxima.status-aguardando-finalizacao .rotulo-icone {
   color: var(--status-amber);
 }
 .card-resumo .valor {
@@ -1140,14 +1241,17 @@ main::-webkit-scrollbar {
 .card-lista:active {
   transform: scale(0.98);
 }
-.card-lista.status-parcial {
+.card-lista.status-pendente {
+  border-left-color: var(--status-vermelho);
+}
+.card-lista.status-aguardando-finalizacao {
   border-left-color: var(--status-amber);
 }
 .card-lista.status-comprada {
   border-left-color: var(--status-verde);
 }
 .card-lista.status-vazia {
-  border-left-color: var(--line);
+  border-left-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .card-lista-topo {
   display: flex;
@@ -1169,14 +1273,14 @@ main::-webkit-scrollbar {
   color: #fff;
   background: var(--status-vermelho);
 }
-.badge-status.parcial {
+.badge-status.aguardando-finalizacao {
   background: var(--status-amber);
 }
 .badge-status.comprada {
   background: var(--status-verde);
 }
 .badge-status.vazia {
-  background: var(--muted);
+  background: var(--primary);
 }
 .card-lista-obs {
   font-size: 12px;
@@ -1217,20 +1321,26 @@ main::-webkit-scrollbar {
   font-size: 11px;
   color: var(--muted);
 }
-.icone-pendente {
+.icone-pendente,
+.icone-comprado {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.15em;
   height: 1.15em;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--status-vermelho) 55%, transparent);
   color: #fff;
   font-size: 0.85em;
   font-weight: 700;
   line-height: 1;
   vertical-align: middle;
   margin-top: -0.15em;
+}
+.icone-pendente {
+  background: color-mix(in srgb, var(--status-vermelho) 55%, transparent);
+}
+.icone-comprado {
+  background: color-mix(in srgb, var(--status-verde) 55%, transparent);
 }
 
 /* ---------- listas / itens ---------- */
@@ -1251,7 +1361,7 @@ main::-webkit-scrollbar {
   background: var(--superficie-glass), var(--card);
   border: 1px solid var(--borda-glass);
   border-radius: 16px;
-  padding: 14px;
+  padding: 16px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1288,11 +1398,25 @@ main::-webkit-scrollbar {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* Marca/descrição/descrição da unidade numa linha só, cortando com "..." em vez de quebrar (o
+   flex-wrap de ".item .detalhe"/".mc-item-info .detalhe" quebrava no meio de qualquer palavra
+   quando não cabia tudo) — precisa das duas classes juntas (mesma especificidade + vem depois no
+   arquivo) pra realmente sobrescrever o "display:flex" das regras acima. */
+.detalhe.detalhe-truncado {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item .local-compra-item,
 .item .adicionado-por {
   font-size: 10.5px;
   color: var(--muted);
   opacity: 0.8;
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .item .valor {
   font-family: "Sora";
@@ -1302,6 +1426,22 @@ main::-webkit-scrollbar {
 }
 .item.comprado .valor {
   color: var(--green);
+}
+.seta-tendencia {
+  font-size: 13px;
+  margin-left: 3px;
+  vertical-align: 1px;
+}
+.seta-tendencia.discreta {
+  font-size: 11px;
+  opacity: 0.85;
+  vertical-align: 1px;
+}
+.seta-tendencia.queda {
+  color: var(--status-verde);
+}
+.seta-tendencia.alta {
+  color: var(--status-vermelho);
 }
 .valor-linha {
   display: flex;

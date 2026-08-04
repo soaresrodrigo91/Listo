@@ -106,7 +106,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.71</div>
+      <div class="menu-versao" id="app-versao">01.72</div>
     </div>
   </aside>
 
@@ -190,6 +190,13 @@
 
   <!-- ---------- Listas de Compras (carrossel) ---------- -->
   <div id="tela-listas" class="screen hidden">
+    <div class="cabecalho-fixo">
+      <div class="filtro-mes-wrap">
+        <select id="filtro-mes-listas" aria-label="Mês"></select>
+        <select id="filtro-ano-listas" aria-label="Ano"></select>
+        <button type="button" class="btn-secundario" id="btn-mes-atual-listas">Este mês</button>
+      </div>
+    </div>
     <main>
       <div class="carrossel-listas" id="carrossel-listas"></div>
     </main>
@@ -217,7 +224,7 @@
           <div class="field"><label>Valor</label><input id="ld-valor-provisionado" type="text" disabled placeholder="R$ 0,00"></div>
           <div class="linha-dupla">
             <button class="btn" id="btn-adicionar-item-lista">+ Adicionar item</button>
-            <button class="btn-secundario btn-cancelar" id="btn-cancelar-add-item-lista">Cancelar</button>
+            <button class="btn-secundario" id="btn-cancelar-add-item-lista">Cancelar</button>
           </div>
         </div>
       </div>
@@ -314,7 +321,7 @@
       <div id="msg-form-item"></div>
       <button class="btn" id="btn-salvar-item">Salvar</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-item">Excluir item</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-item">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-item">Cancelar</button>
     </main>
   </div>
 
@@ -339,7 +346,7 @@
       <div id="msg-form-grupo"></div>
       <button class="btn" id="btn-salvar-grupo">Salvar</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-grupo">Excluir grupo</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-grupo">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-grupo">Cancelar</button>
     </main>
   </div>
 
@@ -379,7 +386,7 @@
       <div id="msg-form-local"></div>
       <button class="btn" id="btn-salvar-local">Salvar</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-local">Excluir local</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-local">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-local">Cancelar</button>
     </main>
   </div>
 
@@ -403,7 +410,7 @@
       <div id="msg-form-forma"></div>
       <button class="btn" id="btn-salvar-forma">Salvar</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-forma">Excluir forma de pagamento</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-forma">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-forma">Cancelar</button>
     </main>
   </div>
 
@@ -433,7 +440,7 @@
       <div id="msg-form-unidade"></div>
       <button class="btn" id="btn-salvar-unidade">Salvar</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-unidade">Excluir unidade de medida</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-unidade">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-unidade">Cancelar</button>
     </main>
   </div>
 
@@ -445,8 +452,9 @@
       <div class="field"><label>Observações</label><input id="fn-observacoes" type="text" placeholder="Opcional"></div>
       <div id="msg-form-lista"></div>
       <button class="btn" id="btn-salvar-lista">Salvar</button>
+      <button class="btn-secundario btn-reabrir hidden" id="btn-reabrir-lista-editar">Reabrir lista</button>
       <button class="btn-secundario btn-cancelar hidden" id="btn-excluir-lista">Excluir lista</button>
-      <button class="btn-secundario btn-cancelar" id="btn-cancelar-lista">Cancelar</button>
+      <button class="btn-secundario" id="btn-cancelar-lista">Cancelar</button>
     </main>
   </div>
 
@@ -505,6 +513,12 @@
         <div class="card-dashboard-header"><span class="card-dashboard-titulo">Valor que será considerado na lista</span></div>
         <div class="detalhe-lista" id="opcoes-valor-provisionado"></div>
       </div>
+      <div class="card-dashboard">
+        <div class="card-dashboard-header"><span class="card-dashboard-titulo">Dados e estatísticas</span></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Refaz do zero os contadores dos dashboards "Itens mais comprados", "Grupos mais comprados" e "Locais mais utilizados", além do valor "Provisionado" (usado na Diferença do resumo) de cada lista já finalizada — use se os números parecerem errados.</p>
+        <button type="button" class="btn-secundario" id="btn-recalcular-estatisticas" style="margin-top:0">Recalcular estatísticas</button>
+        <div id="msg-recalcular-estatisticas"></div>
+      </div>
     </main>
   </div>
 
@@ -534,7 +548,8 @@
   <div class="overlay-mes hidden" id="overlay-comprar">
     <div class="cartao-mes">
       <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Marcar como comprado</h3>
-      <div class="field"><label>Local onde foi comprado *</label><select id="mc-local"></select></div>
+      <div id="mc-item-info" class="mc-item-info"></div>
+      <div class="field"><label>Local da compra atual *</label><select id="mc-local"></select></div>
       <div class="field hidden" id="campo-mc-quantidade">
         <label>Quantidade comprada (<span id="mc-unidade-label"></span>)</label>
         <div class="stepper-quantidade">
@@ -543,7 +558,11 @@
           <button type="button" class="btn-stepper" data-alvo="mc-quantidade" data-delta="1" aria-label="Aumentar quantidade">+</button>
         </div>
       </div>
-      <div class="field"><label>Valor pago *</label><input id="mc-valor" type="text" inputmode="decimal" placeholder="0,00"></div>
+      <div class="field">
+        <label id="rotulo-mc-valor">Valor pago (unitário) *</label>
+        <input id="mc-valor" type="text" inputmode="decimal" placeholder="0,00">
+        <div id="mc-valor-diferenca" class="mc-valor-diferenca"></div>
+      </div>
       <div id="msg-comprar"></div>
       <button class="btn" id="btn-confirmar-compra">Confirmar</button>
       <button class="btn-secundario" id="btn-cancelar-compra">Cancelar</button>
@@ -565,9 +584,13 @@
   <div class="overlay-mes hidden" id="overlay-finalizar">
     <div class="cartao-mes">
       <h3 style="font-family:'Sora';font-size:16px;margin-bottom:14px">Finalizar compra</h3>
-      <div class="field"><label>Forma de pagamento *</label><select id="fin-forma"></select></div>
-      <div class="field hidden" id="fin-parcelas-wrap"><label>Parcelas</label><input id="fin-parcelas" type="number" min="1" value="1"></div>
-      <div class="field"><label>Valor total pago (itens comprados)</label><input id="fin-valor-total" type="text" readonly></div>
+      <div class="field"><label>Valor dos itens comprados</label><input id="fin-valor-total" type="text" readonly></div>
+      <div class="field"><label>Desconto (se aplicado)</label><input id="fin-desconto" type="text" inputmode="decimal" placeholder="0,00"></div>
+      <div class="field"><label>Valor final a pagar</label><input id="fin-valor-final" type="text" readonly></div>
+      <div class="field" style="margin-bottom:6px"><label>Forma(s) de pagamento *</label></div>
+      <div id="fin-pagamentos"></div>
+      <button type="button" class="btn-secundario" id="btn-add-pagamento" style="margin-bottom:14px">+ Adicionar forma de pagamento</button>
+      <div id="fin-restante-pagamentos" class="mc-valor-diferenca"></div>
       <div id="aviso-pendentes-finalizar"></div>
       <div id="msg-finalizar"></div>
       <button class="btn" id="btn-confirmar-finalizar">Finalizar</button>
