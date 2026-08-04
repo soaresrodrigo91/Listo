@@ -1098,18 +1098,6 @@ async function recomputarEstatisticasELista() {
   }
   renderDashboard();
 }
-// Botão em Configurações — mesma recomputação de recomputarEstatisticasELista, só com
-// confirmação e mensagens de status na tela.
-async function recalcularEstatisticasGerais() {
-  if (!confirm("Isso vai refazer os contadores de \"mais comprados\"/\"mais utilizados\" e o total provisionado de cada lista já finalizada, do zero. Continuar?")) return;
-  mostrarMsg("#msg-recalcular-estatisticas", "Recalculando...", "");
-  try {
-    await recomputarEstatisticasELista();
-    mostrarMsg("#msg-recalcular-estatisticas", "Estatísticas e totais recalculados com sucesso!", "sucesso");
-  } catch {
-    mostrarMsg("#msg-recalcular-estatisticas", "Não foi possível recalcular. Tente novamente.", "erro");
-  }
-}
 // Apaga o histórico de preços gerado por uma lista específica (listaId), em qualquer item —
 // usado ao excluir a lista e ao reabri-la (reabrir exige finalizar de novo pra gravar o que for
 // editado, então o histórico da rodada anterior teria dados incompletos/desatualizados).
@@ -3400,8 +3388,6 @@ function ligarEventos() {
     try { localStorage.setItem("temaEscuro", String(escuro)); } catch {}
     aplicarTema(escuro);
   };
-  $("#btn-recalcular-estatisticas").onclick = recalcularEstatisticasGerais;
-
   ["#mc-valor", "#fi-valor", "#fin-desconto"].forEach(ligarMascaraMoeda);
   $("#mc-valor").addEventListener("input", atualizarDiferencaValorComprar);
   $("#fin-desconto").addEventListener("input", atualizarValorFinalFinalizar);
