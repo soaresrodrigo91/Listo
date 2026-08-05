@@ -1250,6 +1250,14 @@ function renderCarrosselListas() {
             <span style="color:${corDiferenca}">Diferença: ${diferenca > 0 ? "+" : ""}${formatarMoeda(diferenca)}</span>
           </div>`
         : "";
+      // "Finalizar compra" direto no card, pra lista ainda aberta com pelo menos 1 item — dá pra
+      // fechar a compra sem nem entrar na lista. Só destrava depois de marcar algo (mesma regra
+      // de sempre: finalizar sem nada comprado viraria uma compra "vazia" no histórico).
+      const finalizarDireto = !l.finalizadaEm && !l.permanente && (l.qtdItens || 0) > 0
+        ? `<div class="card-lista-finalizar">
+            <button type="button" class="btn-finalizar-card" data-id-finalizar="${l.id}" ${comprados > 0 ? "" : "disabled"}>Finalizar compra</button>
+          </div>`
+        : "";
       // O total no topo do card acompanha o progresso da compra: enquanto não finalizada, é a
       // soma dinâmica dos itens (provisionado + já pago); uma vez finalizada, vira o valor real
       // final já com desconto aplicado (valorTotalPago), não a soma "crua" dos itens.
@@ -1271,11 +1279,10 @@ function renderCarrosselListas() {
           <span><span class="icone-comprado">✓</span> ${comprados} comprado${comprados === 1 ? "" : "s"}</span>
           <span><span class="icone-pendente">×</span> ${pendentes} pendente${pendentes === 1 ? "" : "s"}</span>
           <span class="card-lista-acoes">
-            ${l.finalizadaEm ? `<button type="button" class="btn-detalhes-card" data-id-detalhes="${l.id}">Detalhes</button>` : ""}
             <button type="button" class="btn-compartilhar-card" data-id-compartilhar="${l.id}" aria-label="Compartilhar no WhatsApp" title="Compartilhar no WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M21 3 11 13"/><path d="M21 3 14.5 21l-3.5-8L3 9.5 21 3Z"/></svg></button>
           </span>
         </div>
-        ${comparativo}
+        ${comparativo}${finalizarDireto}
       </div>`;
     })
     .join("");
@@ -1288,10 +1295,10 @@ function renderCarrosselListas() {
       compartilharListaWhatsApp(listasAtuais.find((l) => l.id === btn.dataset.idCompartilhar));
     };
   });
-  container.querySelectorAll(".btn-detalhes-card").forEach((btn) => {
+  container.querySelectorAll(".btn-finalizar-card").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
-      abrirModalDetalhesCompra(listasAtuais.find((l) => l.id === btn.dataset.idDetalhes));
+      abrirModalFinalizarDireto(listasAtuais.find((l) => l.id === btn.dataset.idFinalizar));
     };
   });
   corrigirLimitesScrollIOS(container.closest("main"));
@@ -1304,6 +1311,7 @@ function abrirFormNovaLista() {
   $("#fn-nome").value = "";
   $("#fn-observacoes").value = "";
   $("#btn-excluir-lista").classList.add("hidden");
+  $("#zona-acoes-lista").classList.add("hidden");
   mostrarMsg("#msg-form-lista", "", "");
   mostrarTelaCheia("form-lista", "Nova lista");
 }
@@ -1316,6 +1324,7 @@ function abrirFormEditarLista(lista) {
   // "Reabrir" também fica acessível aqui (não só no rodapé da tela de detalhe) — é o lugar mais
   // intuitivo pra quem já finalizou a compra e quer desfazer, mesmo já estando na tela de editar.
   $("#btn-reabrir-lista-editar").classList.toggle("hidden", !lista.finalizadaEm);
+  $("#zona-acoes-lista").classList.remove("hidden");
   mostrarMsg("#msg-form-lista", "", "");
   mostrarTelaCheia("form-lista", "Editar lista");
 }
@@ -1714,17 +1723,15 @@ function renderListaDetalhe() {
     <div class="detalhe-titulo-credor">
       <span class="detalhe-nome-lista">${esc(lista.nome)}</span>
       <span class="badge-status ${classeVisualStatus}">${lista.permanente ? "Permanente" : rotuloStatus}</span>
+      ${lista.finalizadaEm ? `<button type="button" class="link-detalhes-lista" id="btn-abrir-detalhes-lista">Detalhes</button>` : ""}
       <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     </div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
       <span><span class="icone-comprado">✓</span> ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
-    </div>
-    ${!lista.finalizadaEm && !lista.permanente ? `
-    <div class="lista-detalhe-finalizar">
-      <button type="button" class="btn" id="btn-finalizar-compra">Finalizar compra</button>
-    </div>` : ""}`;
+    </div>`;
   $("#btn-abrir-editar-lista").onclick = () => abrirFormEditarLista(lista);
+  if (lista.finalizadaEm) $("#btn-abrir-detalhes-lista").onclick = () => abrirModalDetalhesCompra(lista);
   // Lista finalizada: nada de marcar, editar quantidade ou incluir item novo — só dá pra excluir
   // a lista inteira ou reabri-la primeiro (reabrir já libera tudo de novo).
   if (lista.finalizadaEm) fecharFormAdicionarItem();
@@ -1838,8 +1845,6 @@ function renderListaDetalhe() {
       };
     });
   }
-
-  atualizarBtnFinalizarCompra();
 }
 async function reabrirLista() {
   if (!listaAbertaId) return;
@@ -1957,24 +1962,6 @@ async function notificarMembrosEspaco(mensagem) {
   await batch.commit();
 }
 
-// "Finalizar compra" fica dentro do próprio cabeçalho da lista, numa faixa com linha tracejada
-// (mesma linguagem visual do resumo Provisionado/Real/Diferença nos cards de lista já concluída)
-// em vez de numa linha de botão separada — some enquanto o formulário de adicionar item está
-// aberto, além das condições normais de exibição. O cabeçalho é recriado do zero a cada
-// renderListaDetalhe(), então o botão (e seu onclick) precisam ser religados aqui toda vez.
-function atualizarBtnFinalizarCompra() {
-  const lista = listaAbertaAtual();
-  const btn = $("#btn-finalizar-compra");
-  const linha = btn?.closest(".lista-detalhe-finalizar");
-  if (!btn || !linha) return;
-  const formAberto = !$("#form-adicionar-item").classList.contains("hidden");
-  const visivel = !!lista && lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm && !formAberto;
-  linha.classList.toggle("hidden", !visivel);
-  // Só deixa clicar em "Finalizar compra" com pelo menos 1 item já marcado — finalizar uma lista
-  // sem nada comprado não faz sentido (viraria uma compra "vazia" no histórico).
-  if (lista) btn.disabled = !(lista.qtdComprados > 0);
-  btn.onclick = abrirModalFinalizar;
-}
 function fecharFormAdicionarItem() {
   $("#ld-item-nome").value = "";
   $("#ld-item-id").value = "";
@@ -1986,7 +1973,6 @@ function fecharFormAdicionarItem() {
   $("#ld-item-sugestoes").classList.add("hidden");
   $("#form-adicionar-item").classList.add("hidden");
   $("#btn-abrir-form-add-item").classList.remove("hidden");
-  atualizarBtnFinalizarCompra();
 }
 
 async function adicionarItemNaLista() {
@@ -2463,6 +2449,24 @@ function atualizarValorFinalFinalizar() {
   valorFinalFinalizar = Math.round((totalItensComprasFinalizar - desconto) * 100) / 100;
   $("#fin-valor-final").value = formatarMoeda(valorFinalFinalizar);
   atualizarRestantePagamentos();
+}
+// Abre o modal de finalizar direto do card na tela Listas de Compras, sem passar pela tela de
+// itens da lista. abrirModalFinalizar() só sabe trabalhar com o "lista aberta" global
+// (listaAbertaId/itensListaAtuais), então prepara esse estado aqui primeiro: troca a assinatura
+// em tempo real pra apontar pra essa lista (mesmo padrão de abrirListaDetalhe, cancelando a
+// anterior pra uma mudança remota numa lista antiga não sobrescrever os itens por baixo do
+// modal) e busca os itens uma vez de forma síncrona pra já abrir com os valores certos, sem
+// esperar o primeiro retorno assíncrono do listener.
+async function abrirModalFinalizarDireto(lista) {
+  if (!lista) return;
+  listaAbertaId = lista.id;
+  if (unsubItensLista) unsubItensLista();
+  unsubItensLista = onSnapshot(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"), (snap) => {
+    itensListaAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  });
+  const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
+  itensListaAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  abrirModalFinalizar();
 }
 function abrirModalFinalizar() {
   const lista = listaAbertaAtual();
@@ -3934,7 +3938,6 @@ function ligarEventos() {
     $("#btn-abrir-form-add-item").classList.add("hidden");
     $("#form-adicionar-item").classList.remove("hidden");
     $("#ld-item-nome").focus();
-    atualizarBtnFinalizarCompra();
   };
   // Clicar fora do formulário de adicionar item (com ele aberto) equivale a desistir: recolhe de volta pra linha.
   // Usa composedPath() (caminho capturado no momento do clique) em vez de e.target: escolher uma

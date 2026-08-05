@@ -295,10 +295,43 @@ textarea {
   border-color: var(--danger);
   color: var(--danger);
 }
-/* Padrão de cor dos botões nas telas de editar/cadastrar: Salvar sempre azul (.btn, ação
-   principal), Excluir sempre vermelho (.btn-cancelar, ação destrutiva) — únicas duas cores de
-   destaque. Todo o resto (Cancelar, Reabrir lista) fica neutro (.btn-secundario puro): menos
-   cores disputando atenção na mesma tela. */
+/* Padrão de cor dos botões nas telas de cadastro (Itens, Grupos, Locais, Formas, Unidades):
+   Salvar sempre azul (.btn, ação principal), Excluir sempre vermelho em caixa (.btn-cancelar,
+   ação destrutiva), Cancelar sempre neutro (.btn-secundario puro). A tela de Editar lista foge
+   desse padrão de propósito — ver .zona-acoes-lista, um grupo só com as ações secundárias. */
+.linha-dupla > .btn,
+.linha-dupla > .btn-secundario {
+  margin-top: 0;
+}
+/* Ações secundárias da lista (Reabrir/Excluir) agrupadas numa caixa só, em vez de botões soltos
+   um embaixo do outro — cada linha ocupa a largura toda, com divisor fino entre as que estiverem
+   visíveis ao mesmo tempo (a combinação de seletores com :not(.hidden) evita um divisor "órfão"
+   quando só uma das duas está à mostra, ex.: lista pendente sem "Reabrir"). */
+.zona-acoes-lista {
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.linha-acao-lista {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  text-align: left;
+  color: var(--text);
+  background: var(--bg-soft);
+}
+.linha-acao-lista:not(.hidden) + .linha-acao-lista:not(.hidden) {
+  border-top: 1px solid var(--line);
+}
+.linha-acao-lista:active {
+  background: var(--bg);
+}
+.linha-acao-lista-perigo {
+  color: var(--danger);
+}
 .aviso {
   margin-top: 14px;
   padding: 12px 14px;
@@ -888,6 +921,14 @@ textarea {
   font-weight: 500;
   color: var(--muted);
 }
+/* Só o texto, sem caixa/pílula — ao lado do badge de status (que já é uma pílula colorida),
+   outro elemento em formato de pílula pareceria uma segunda "flag" de status em vez de uma ação. */
+.link-detalhes-lista {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
 .btn-editar-lista-mini {
   margin-left: auto;
   flex-shrink: 0;
@@ -908,18 +949,6 @@ textarea {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-.btn-detalhes-card {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--bg-soft);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-.btn-detalhes-card:active {
-  transform: scale(0.96);
 }
 .btn-compartilhar-card {
   width: 22px;
@@ -1485,17 +1514,36 @@ main::-webkit-scrollbar {
   font-size: 11px;
   color: var(--muted);
 }
-/* "Finalizar compra" embutido no cabeçalho da lista (mesma faixa com linha tracejada usada no
-   resumo Provisionado/Real/Diferença dos cards de lista já concluída) em vez de numa linha de
-   botão separada mais abaixo — cabeçalho fica mais compacto e a ação principal já some assim que
-   a lista é finalizada (o bloco inteiro não é renderizado nesse caso, ver JS). */
-.lista-detalhe-finalizar {
+/* "Finalizar compra" direto no card da lista, na tela Listas de Compras — mesma faixa com linha
+   tracejada usada no resumo Provisionado/Real/Diferença dos cards de lista já concluída, só que
+   pra lista ainda aberta. Fica de fora da tela de itens da lista de propósito: dá pra finalizar
+   sem nem precisar abrir a lista. */
+.card-lista-finalizar {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--line);
+  display: flex;
+  justify-content: flex-start;
 }
-.lista-detalhe-finalizar .btn {
-  margin-top: 0;
+/* Retângulo com sombra, no mesmo espírito do .btn principal (só que compacto) — de propósito
+   BEM diferente do .badge-status (pílula sem sombra, arredondamento total): aquilo é uma etiqueta
+   de status, isso aqui precisa ler como um botão clicável de verdade. */
+.btn-finalizar-card {
+  flex-shrink: 0;
+  padding: 8px 18px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary), #38bdf8);
+  color: var(--primary-ink);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
+}
+.btn-finalizar-card:disabled {
+  opacity: 0.5;
+  box-shadow: none;
+}
+.btn-finalizar-card:active {
+  transform: scale(0.96);
 }
 .icone-pendente,
 .icone-comprado {
