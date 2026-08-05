@@ -1719,7 +1719,11 @@ function renderListaDetalhe() {
     <div class="card-lista-rodape" style="margin-bottom:6px">
       <span><span class="icone-comprado">✓</span> ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>
       <span class="valor">${formatarMoeda(valorTotal)}</span>
-    </div>`;
+    </div>
+    ${!lista.finalizadaEm && !lista.permanente ? `
+    <div class="lista-detalhe-finalizar">
+      <button type="button" class="btn" id="btn-finalizar-compra">Finalizar compra</button>
+    </div>` : ""}`;
   $("#btn-abrir-editar-lista").onclick = () => abrirFormEditarLista(lista);
   // Lista finalizada: nada de marcar, editar quantidade ou incluir item novo — só dá pra excluir
   // a lista inteira ou reabri-la primeiro (reabrir já libera tudo de novo).
@@ -1836,7 +1840,6 @@ function renderListaDetalhe() {
   }
 
   atualizarBtnFinalizarCompra();
-  $("#btn-reabrir-lista").classList.toggle("hidden", !lista.finalizadaEm);
 }
 async function reabrirLista() {
   if (!listaAbertaId) return;
@@ -1954,18 +1957,23 @@ async function notificarMembrosEspaco(mensagem) {
   await batch.commit();
 }
 
-// "Finalizar compra" fica ao lado de "+ Adicionar item" em vez de sozinho no fim da lista de
-// itens (onde ficava inacessível sem rolar até o fim, numa lista comprida) — some enquanto o
-// formulário de adicionar item está aberto, além das condições normais de exibição.
+// "Finalizar compra" fica dentro do próprio cabeçalho da lista, numa faixa com linha tracejada
+// (mesma linguagem visual do resumo Provisionado/Real/Diferença nos cards de lista já concluída)
+// em vez de numa linha de botão separada — some enquanto o formulário de adicionar item está
+// aberto, além das condições normais de exibição. O cabeçalho é recriado do zero a cada
+// renderListaDetalhe(), então o botão (e seu onclick) precisam ser religados aqui toda vez.
 function atualizarBtnFinalizarCompra() {
   const lista = listaAbertaAtual();
+  const btn = $("#btn-finalizar-compra");
+  const linha = btn?.closest(".lista-detalhe-finalizar");
+  if (!btn || !linha) return;
   const formAberto = !$("#form-adicionar-item").classList.contains("hidden");
   const visivel = !!lista && lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm && !formAberto;
-  $("#btn-finalizar-compra").classList.toggle("hidden", !visivel);
-  $("#linha-acoes-lista").classList.toggle("unico", !visivel);
+  linha.classList.toggle("hidden", !visivel);
   // Só deixa clicar em "Finalizar compra" com pelo menos 1 item já marcado — finalizar uma lista
   // sem nada comprado não faz sentido (viraria uma compra "vazia" no histórico).
-  if (lista) $("#btn-finalizar-compra").disabled = !(lista.qtdComprados > 0);
+  if (lista) btn.disabled = !(lista.qtdComprados > 0);
+  btn.onclick = abrirModalFinalizar;
 }
 function fecharFormAdicionarItem() {
   $("#ld-item-nome").value = "";
@@ -3939,9 +3947,6 @@ function ligarEventos() {
     if (caminho.includes(form) || caminho.includes($("#btn-abrir-form-add-item"))) return;
     fecharFormAdicionarItem();
   });
-  $("#btn-finalizar-compra").onclick = abrirModalFinalizar;
-  $("#btn-reabrir-lista").onclick = reabrirLista;
-
   ["nome", "valor"].forEach((tipo) => {
     $(`#btn-ordenar-lista-${tipo}`).onclick = () => {
       if (ordenacaoListaFinalizada === tipo) {
