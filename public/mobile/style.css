@@ -305,7 +305,9 @@ textarea {
 }
 /* Cancelar/Salvar como duas células de uma caixa só (em vez do .btn/.btn-secundario padrão, alto
    e com sombra) — mesma escala visual compacta da caixa de ações logo abaixo, pro conjunto da
-   tela não parecer duas linguagens de botão diferentes. Salvar se destaca só pela cor do texto. */
+   tela não parecer duas linguagens de botão diferentes. Texto sempre azul (cor "padrão" de ação
+   clicável, mesmo idioma do .linha-acao-lista abaixo) — sem cor, o nome dentro de uma caixinha
+   com fundo fica parecendo informação de um campo, não um botão. */
 .zona-principal-lista {
   margin-top: 4px;
   display: grid;
@@ -319,7 +321,7 @@ textarea {
   font-weight: 700;
   font-size: 14px;
   text-align: center;
-  color: var(--text);
+  color: var(--primary);
   background: var(--bg-soft);
 }
 .zona-principal-lista button:first-child {
@@ -328,13 +330,11 @@ textarea {
 .zona-principal-lista button:active {
   background: var(--bg);
 }
-#btn-salvar-lista {
-  color: var(--primary);
-}
 /* Ações secundárias da lista (Reabrir/Excluir) agrupadas numa caixa só, em vez de botões soltos
    um embaixo do outro — cada linha ocupa a largura toda, com divisor fino entre as que estiverem
    visíveis ao mesmo tempo (a combinação de seletores com :not(.hidden) evita um divisor "órfão"
-   quando só uma das duas está à mostra, ex.: lista pendente sem "Reabrir"). */
+   quando só uma das duas está à mostra, ex.: lista pendente sem "Reabrir"). Azul por padrão (cor
+   "de botão", não de texto solto); vermelho só na ação destrutiva (.linha-acao-lista-perigo). */
 .zona-acoes-lista {
   margin-top: 22px;
   border: 1px solid var(--line);
@@ -348,7 +348,7 @@ textarea {
   font-weight: 600;
   font-size: 14px;
   text-align: left;
-  color: var(--text);
+  color: var(--primary);
   background: var(--bg-soft);
 }
 .linha-acao-lista:not(.hidden) + .linha-acao-lista:not(.hidden) {
