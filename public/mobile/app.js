@@ -923,9 +923,8 @@ function renderDashboard() {
   // "Pendente" aqui é "ainda não finalizada" (finalizadaEm), não "status comprada" — uma lista
   // com todos os itens já marcados, mas ainda sem finalizar, continua editável normalmente.
   const pendentes = listasAtuais.filter((l) => !l.finalizadaEm);
-  const valorProvisionado = pendentes.reduce((s, l) => s + (l.valorProvisionadoTotal || 0), 0);
-  $("#dash-valor-provisionado").textContent = formatarMoeda(valorProvisionado);
-
+  // "Valor provisionado" e "Itens pendentes" seguem a lista selecionada no carrossel "Lista
+  // (Pendente)" logo acima, não a soma de todas as pendentes — ver atualizarSelecao.
   renderCarrosselProximaCompra(pendentes);
 
   const meuToken = ++dashboardRenderToken;
@@ -955,6 +954,7 @@ function renderCarrosselProximaCompra(pendentes) {
     pontos.innerHTML = "";
     delete carrossel.dataset.idSelecionado;
     $("#dash-itens-pendentes").textContent = "0";
+    $("#dash-valor-provisionado").textContent = formatarMoeda(0);
     $("#card-lista-proxima").classList.remove("status-pendente", "status-aguardando-finalizacao");
     return;
   }
@@ -968,12 +968,13 @@ function renderCarrosselProximaCompra(pendentes) {
     const idx = Math.min(ordenadas.length - 1, Math.max(0, Math.round(carrossel.scrollLeft / (carrossel.clientWidth || 1))));
     const lista = ordenadas[idx];
     $("#dash-itens-pendentes").textContent = String(Math.max((lista.qtdItens || 0) - (lista.qtdComprados || 0), 0));
+    $("#dash-valor-provisionado").textContent = formatarMoeda(lista.valorProvisionadoTotal || 0);
     pontos.querySelectorAll("span").forEach((s, i) => s.classList.toggle("ativo", i === idx));
     carrossel.dataset.idSelecionado = lista.id;
-    // Cor unificada com o badge da tela de Listas (ver statusVisualLista): azul só quando vazia,
-    // vermelha só quando nada foi marcado ainda, laranja assim que existe pelo menos 1 item
-    // marcado — a lista só sai daqui quando finalizada de verdade (ver filtro de `pendentes`),
-    // então "comprada" (verde) nunca acontece nesse card.
+    // Cor unificada com o badge da tela de Listas (ver statusVisualLista): vermelha só quando
+    // nada foi marcado ainda, laranja assim que existe pelo menos 1 item marcado — a lista só sai
+    // daqui quando finalizada de verdade (ver filtro de `pendentes`), então "comprada" (verde)
+    // nunca acontece nesse card.
     const classeStatus = statusVisualLista(lista).classe;
     $("#card-lista-proxima").classList.toggle("status-pendente", classeStatus === "pendente");
     $("#card-lista-proxima").classList.toggle("status-aguardando-finalizacao", classeStatus === "aguardando-finalizacao");
@@ -1162,12 +1163,13 @@ function atualizarTotalListasMes() {
 }
 // Rótulo/cor do badge de status de uma lista — mesmo critério em toda parte que mostra o status
 // (card da tela Listas de Compras, cabeçalho da lista aberta, card "Lembrete de Compras" da
-// Início). Cor: vermelho só quando nada foi marcado ainda, laranja assim que existe pelo menos 1
-// item marcado (mesmo que faltem outros, ou mesmo já com todos marcados) e verde só depois de
-// finalizada de fato (confirmarFinalizar) — pra não parecer concluída antes da hora. Rótulo: as
-// duas situações "laranja" têm nomes diferentes ("Parcial" com itens faltando, "Não finalizada"
-// com tudo já marcado) mesmo tendo a mesma cor, porque "Comprada" como rótulo único pra ambas só
-// confundia (parecia concluída antes da hora).
+// Início). Cor: vermelho quando nada foi marcado ainda (mesmo lista recém-criada sem item algum —
+// "pendente" é sempre vermelho, sem exceção "neutra" pra lista vazia), laranja assim que existe
+// pelo menos 1 item marcado (mesmo que faltem outros, ou mesmo já com todos marcados) e verde só
+// depois de finalizada de fato (confirmarFinalizar) — pra não parecer concluída antes da hora.
+// Rótulo: as duas situações "laranja" têm nomes diferentes ("Parcial" com itens faltando, "Não
+// finalizada" com tudo já marcado) mesmo tendo a mesma cor, porque "Comprada" como rótulo único
+// pra ambas só confundia (parecia concluída antes da hora).
 function statusVisualLista(lista) {
   const status = lista.status || "pendente";
   const rotulo = lista.finalizadaEm
@@ -1177,13 +1179,11 @@ function statusVisualLista(lista) {
       : status === "comprada"
         ? "Não finalizada"
         : "Parcial";
-  const classe = (lista.qtdItens || 0) === 0
-    ? "vazia"
-    : lista.finalizadaEm
-      ? "comprada"
-      : status === "pendente"
-        ? "pendente"
-        : "aguardando-finalizacao";
+  const classe = lista.finalizadaEm
+    ? "comprada"
+    : status === "pendente"
+      ? "pendente"
+      : "aguardando-finalizacao";
   return { rotulo, classe };
 }
 function renderCarrosselListas() {
