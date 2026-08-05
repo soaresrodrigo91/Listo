@@ -305,16 +305,17 @@ textarea {
 }
 /* Cancelar/Salvar como duas células de uma caixa só (em vez do .btn/.btn-secundario padrão, alto
    e com sombra) — mesma escala visual compacta da caixa de ações logo abaixo, pro conjunto da
-   tela não parecer duas linguagens de botão diferentes. Texto sempre azul (cor "padrão" de ação
-   clicável, mesmo idioma do .linha-acao-lista abaixo) — sem cor, o nome dentro de uma caixinha
-   com fundo fica parecendo informação de um campo, não um botão. */
+   tela não parecer duas linguagens de botão diferentes. Fundo com leve sombra "flutuando" sobre a
+   página (mesma receita de .item/.card-lista) em vez do fundo liso var(--bg-soft) usado pelos
+   campos de texto — com a MESMA caixa lisa dos campos, o nome dentro dela ficava parecendo
+   informação de um campo em vez de botão; a sombra separa visualmente as duas linguagens. */
 .zona-principal-lista {
   margin-top: 4px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 4px 14px var(--card-shadow-sm);
 }
 .zona-principal-lista button {
   padding: 14px 0;
@@ -322,24 +323,25 @@ textarea {
   font-size: 14px;
   text-align: center;
   color: var(--primary);
-  background: var(--bg-soft);
+  background: var(--superficie-glass), var(--card);
 }
 .zona-principal-lista button:first-child {
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--borda-glass);
 }
 .zona-principal-lista button:active {
-  background: var(--bg);
+  background: var(--bg-soft);
 }
 /* Ações secundárias da lista (Reabrir/Excluir) agrupadas numa caixa só, em vez de botões soltos
    um embaixo do outro — cada linha ocupa a largura toda, com divisor fino entre as que estiverem
    visíveis ao mesmo tempo (a combinação de seletores com :not(.hidden) evita um divisor "órfão"
    quando só uma das duas está à mostra, ex.: lista pendente sem "Reabrir"). Azul por padrão (cor
-   "de botão", não de texto solto); vermelho só na ação destrutiva (.linha-acao-lista-perigo). */
+   "de botão", não de texto solto); vermelho só na ação destrutiva (.linha-acao-lista-perigo).
+   Mesma sombra "flutuando" da caixa acima, pelo mesmo motivo: diferenciar de campo de texto. */
 .zona-acoes-lista {
   margin-top: 22px;
-  border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 4px 14px var(--card-shadow-sm);
 }
 .linha-acao-lista {
   display: block;
@@ -349,13 +351,13 @@ textarea {
   font-size: 14px;
   text-align: left;
   color: var(--primary);
-  background: var(--bg-soft);
+  background: var(--superficie-glass), var(--card);
 }
 .linha-acao-lista:not(.hidden) + .linha-acao-lista:not(.hidden) {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--borda-glass);
 }
 .linha-acao-lista:active {
-  background: var(--bg);
+  background: var(--bg-soft);
 }
 .linha-acao-lista-perigo {
   color: var(--danger);
@@ -1647,7 +1649,7 @@ main::-webkit-scrollbar {
 }
 .item-linha-secundaria {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 7px;
   margin-top: 5px;
 }
@@ -1746,6 +1748,7 @@ main::-webkit-scrollbar {
   color: var(--muted);
   flex-shrink: 0;
   white-space: nowrap;
+  margin-left: 6px;
 }
 .btn-qtd {
   font-size: 13px;

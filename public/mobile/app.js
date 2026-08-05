@@ -1717,9 +1717,11 @@ function renderListaDetalhe() {
   if (filtroGrupoLista) itens = itens.filter((i) => i.grupoNome === filtroGrupoLista);
 
   // Contagem e total no cabeçalho seguem o filtro atual: com "Todos" é a lista inteira,
-  // filtrando por grupo só mostra essa fatia.
-  const qtdComprados = somaQuantidades(itens.filter((i) => i.comprado));
-  const qtdPendentes = Math.max(somaQuantidades(itens) - qtdComprados, 0);
+  // filtrando por grupo só mostra essa fatia. Diferente de somaQuantidades (usada no card da
+  // lista e nos dashboards), aqui cada linha do item conta como 1, não importa a quantidade —
+  // é a contagem de quantos itens ainda faltam pegar/já foram pegos, não de "quantas unidades".
+  const qtdComprados = itens.filter((i) => i.comprado).length;
+  const qtdPendentes = itens.length - qtdComprados;
   const valorTotal = itens.reduce((s, i) => s + (i.subtotal || 0), 0);
   $("#lista-detalhe-cabecalho").innerHTML = `
     <div class="detalhe-titulo-credor">
