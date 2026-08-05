@@ -1520,6 +1520,10 @@ function abrirListaDetalhe(lista) {
     itensListaAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderListaDetalhe();
   });
+  // Autocorrige qtdItens/qtdComprados gravados com uma fórmula antiga (ex.: contagem por
+  // quantidade em vez de por linha) assim que a lista é aberta de novo — sem isso, o card na tela
+  // Listas de Compras ficaria com o número desatualizado até a próxima alteração num item.
+  recalcularTotaisLista(lista.id);
   mostrarTelaCheia("lista-detalhe", "Lista de Compras");
   fecharFormAdicionarItem();
 }
@@ -2032,12 +2036,10 @@ async function adicionarItemNaLista() {
 // Busca os itens direto do servidor (getDocs) em vez de usar itensListaAtuais: logo após um
 // addDoc/updateDoc/deleteDoc, o listener onSnapshot pode ainda não ter atualizado o cache local,
 // e os totais ficariam errados se lêssemos o array em memória nesse instante.
-// Conta "quantidade de itens" pela quantidade de cada linha só quando a unidade é contável
-// (arroz em pacotes com quantidade 3 conta como 3 itens, não como 1 linha) — senão a contagem
-// fica menor do que a real. Unidade fracionável (kg, g, ml, l) é sempre 1: é um produto só,
-// só pesado/medido em vez de contado — 2kg de arroz não são "2 itens comprados".
+// Conta "quantidade de itens" pelo número de linhas da lista, não pela quantidade/unidade de cada
+// uma — 3 pacotes de arroz numa linha só contam como 1 item pendente/comprado, não como 3.
 function somaQuantidades(itens) {
-  return itens.reduce((s, i) => s + (unidadeAceitaFracao(i.unidade) ? 1 : Math.max(1, Math.round(i.quantidade || 1))), 0);
+  return itens.length;
 }
 async function recalcularTotaisLista(listaId = listaAbertaId) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", listaId, "itensLista"));
