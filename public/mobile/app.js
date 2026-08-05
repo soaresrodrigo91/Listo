@@ -1196,11 +1196,28 @@ function statusVisualLista(lista) {
       : "aguardando-finalizacao";
   return { rotulo, classe };
 }
+// O Safari do iOS (principalmente com o app instalado na tela de início, em modo standalone) às
+// vezes "esquece" de recalcular a área rolável de um container quando o conteúdo é inserido
+// depois que a tela já foi desenhada — caso de toda lista carregada de forma assíncrona via
+// Firestore. O toque simplesmente não rola mais, mesmo com overflow-y:auto e conteúdo maior que
+// o container. Alternar -webkit-overflow-scrolling força o WebKit a recalcular os limites.
+function corrigirLimitesScrollIOS(elemento) {
+  if (!elemento) return;
+  // setProperty com o nome cru (com hífen) em vez de "elemento.style.webkitOverflowScrolling":
+  // o mapeamento pra camelCase de propriedades com prefixo de fabricante varia entre navegadores
+  // (WebkitOverflowScrolling com W maiúsculo é o correto pela spec) e um nome errado vira um
+  // no-op silencioso, sem erro nenhum — setProperty não tem essa ambiguidade.
+  elemento.style.setProperty("-webkit-overflow-scrolling", "auto");
+  requestAnimationFrame(() => {
+    elemento.style.setProperty("-webkit-overflow-scrolling", "touch");
+  });
+}
 function renderCarrosselListas() {
   atualizarTotalListasMes();
   const container = $("#carrossel-listas");
   if (listasAtuais.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista ainda. Toque em “+” para criar a primeira.</div>`;
+    corrigirLimitesScrollIOS(container.closest("main"));
     return;
   }
   // Cada lista é filtrada pela data que faz mais sentido pra ela: "finalizadaEm" (quando a
@@ -1208,6 +1225,7 @@ function renderCarrosselListas() {
   const doMes = listasAtuais.filter((l) => mesAnoDoTimestamp(l.finalizadaEm ?? l.criadoEm) === filtroMesAnoListas);
   if (doMes.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista nesse mês.</div>`;
+    corrigirLimitesScrollIOS(container.closest("main"));
     return;
   }
   const ordenadas = [...doMes].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
@@ -1276,6 +1294,7 @@ function renderCarrosselListas() {
       abrirModalDetalhesCompra(listasAtuais.find((l) => l.id === btn.dataset.idDetalhes));
     };
   });
+  corrigirLimitesScrollIOS(container.closest("main"));
 }
 
 /* ---------- formulário nova/editar lista ---------- */
