@@ -33,6 +33,13 @@ function mesAnoDoTimestamp(timestamp) {
   const d = timestamp.toDate();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+// "YYYY-MM-DD" de um Timestamp do Firestore, no fuso local — mesmo formato usado no campo "data"
+// do histórico de preços.
+function dataISODoTimestamp(timestamp) {
+  if (!timestamp?.toDate) return null;
+  const d = timestamp.toDate();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 function formatarDataBR(dataISO) {
   if (!dataISO) return "—";
   const [ano, mes, dia] = dataISO.split("-");
@@ -141,6 +148,34 @@ function confirmarApesarDeParecido(linhasDetalhe) {
   const detalhe = linhasDetalhe.filter(Boolean).join("\n");
   return confirm(`Já existe um cadastro com nome igual ou parecido:\n\n${detalhe}\n\nDeseja continuar e salvar mesmo assim?`);
 }
+// Grupo, Local, Unidade e Forma de pagamento são listas fechadas — nome igual (ignorando
+// maiúscula/acento) sempre bloqueia a criação, não tem "salvar mesmo assim" (registro repetido
+// não faz sentido pra esse tipo de cadastro). Nome só "parecido" (não idêntico) continua sendo um
+// aviso que deixa passar — pode ser a mesma loja/grupo grafada diferente, mas também pode não ser.
+// Item, ao contrário de grupo/local/unidade/forma, pode repetir o nome legitimamente (a mesma
+// fruta/produto em marcas ou descrições diferentes) — só bloqueia quando o cadastro inteiro é
+// idêntico a um item já existente.
+function itemIdenticoAoCadastro(existente, dados) {
+  const norm = (s) => normalizarTexto(s || "");
+  return norm(existente.nome) === norm(dados.nome)
+    && norm(existente.marca) === norm(dados.marca)
+    && norm(existente.descricao) === norm(dados.descricao)
+    && norm(existente.descricaoUnidade) === norm(dados.descricaoUnidade)
+    && norm(existente.unidade) === norm(dados.unidade)
+    && existente.grupoId === dados.grupoId
+    && existente.localId === dados.localId
+    && (existente.valor || 0) === (dados.valor || 0);
+}
+function podeSalvarComEsseNome(seletorMsg, nome, lista, linhasDetalhe) {
+  const alvo = normalizarTexto(nome);
+  if (lista.some((item) => normalizarTexto(item.nome) === alvo)) {
+    mostrarMsg(seletorMsg, "Já existe um cadastro com esse nome.", "erro");
+    return false;
+  }
+  const parecido = encontrarNomeParecido(nome, lista);
+  if (parecido && !confirmarApesarDeParecido(linhasDetalhe(parecido))) return false;
+  return true;
+}
 function formatarTelefone(valor) {
   const digitos = valor.replace(/\D/g, "").slice(0, 11);
   if (digitos.length === 0) return "";
@@ -182,7 +217,11 @@ const $ = (s) => document.querySelector(s);
 /* ---------- seeds do espaço novo ---------- */
 const GRUPOS_PADRAO = ["Higiene Pessoal", "Limpeza", "Verduras e Frutas", "Carnes", "Padaria", "Bebidas", "Laticínios", "Congelados", "Utilidades Domésticas", "Temperos"]
   .map((nome) => ({ nome, descricao: null }));
-const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center Pão"]
+// "Não informado" é um local especial que sempre existe em todo espaço — é o valor padrão do
+// campo obrigatório "Local" no cadastro de item, tanto pra item novo (já vem marcado) quanto pra
+// item antigo que nunca teve local (migrado por garantirLocalNaoInformado/garantirLocalPadraoEmItens).
+const NOME_LOCAL_NAO_INFORMADO = "Não informado";
+const LOCAIS_PADRAO = ["Supermercados BH", "Villefort", "Mart Minas", "Center Pão", NOME_LOCAL_NAO_INFORMADO]
   .map((nome) => ({ nome, endereco: null, cidade: null }));
 const FORMAS_PADRAO = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Flash"]
   .map((nome) => ({ nome }));
@@ -502,11 +541,79 @@ async function garantirCatalogoSemeado(espacoId) {
         return Promise.all(padrao.map((doc_) => addDoc(collection(bd, "espacos", espacoId, nome), doc_)));
       })
     );
+
+    // Antes de tudo, funde locais que ficaram com o mesmo nome (ex.: duas sessões criando "Não
+    // informado" ao mesmo tempo numa corrida) — sem isso, garantirLocalNaoInformado abaixo poderia
+    // escolher um dos dois arbitrariamente e deixar o outro órfão pra sempre.
+    await mesclarLocaisDuplicados(espacoId);
+
+    // "Não informado" precisa existir em TODO espaço, não só nos novos — espaços criados antes
+    // do campo "Local" existir no cadastro de item já têm a coleção "locais" não-vazia, então o
+    // seeding padrão acima (que só roda com a coleção vazia) nunca chegaria a criar esse local
+    // neles. Depois de garantir que ele existe, aproveita e migra os itens antigos que ainda não
+    // têm local (ver garantirLocalPadraoEmItens).
+    const naoInformadoId = await garantirLocalNaoInformado(espacoId);
+    if (naoInformadoId) await garantirLocalPadraoEmItens(espacoId, naoInformadoId);
   } catch (e) {
     console.error("garantirCatalogoSemeado falhou:", e);
   } finally {
     espacosSemeandoEmAndamento.delete(espacoId);
   }
+}
+// Funde locais com o mesmo nome (ignorando maiúscula/acento) num só — mantém o mais antigo (menor
+// id de criação não dá pra saber, então usa ordem alfabética do id do documento como critério
+// estável) e reaponta pra ele tanto o cadastro do item (localId) quanto o histórico de preços de
+// cada item antes de apagar os duplicados, senão a referência ficaria quebrada.
+async function mesclarLocaisDuplicados(espacoId) {
+  const snapLocais = await getDocs(collection(bd, "espacos", espacoId, "locais"));
+  const porNome = new Map();
+  for (const d of snapLocais.docs) {
+    const chave = normalizarTexto(d.data().nome);
+    if (!porNome.has(chave)) porNome.set(chave, []);
+    porNome.get(chave).push(d);
+  }
+  const grupos = [...porNome.values()].filter((docs) => docs.length > 1);
+  if (!grupos.length) return;
+  const snapItens = await getDocs(collection(bd, "espacos", espacoId, "itens"));
+  for (const docs of grupos) {
+    docs.sort((a, b) => a.id.localeCompare(b.id));
+    const [canonico, ...duplicados] = docs;
+    for (const dup of duplicados) {
+      for (const it of snapItens.docs) {
+        if (it.data().localId === dup.id) {
+          await updateDoc(doc(bd, "espacos", espacoId, "itens", it.id), { localId: canonico.id, localNome: canonico.data().nome });
+        }
+        const snapHist = await getDocs(query(collection(bd, "espacos", espacoId, "itens", it.id, "historicoPrecos"), where("localId", "==", dup.id)));
+        await Promise.allSettled(snapHist.docs.map((h) =>
+          updateDoc(doc(bd, "espacos", espacoId, "itens", it.id, "historicoPrecos", h.id), { localId: canonico.id })
+        ));
+      }
+      await deleteDoc(doc(bd, "espacos", espacoId, "locais", dup.id));
+    }
+  }
+}
+async function garantirLocalNaoInformado(espacoId) {
+  // Comparação ignora maiúscula/acento: alguns espaços já podem ter um local equivalente
+  // cadastrado manualmente (ex.: "Não Informado") antes desse campo virar automático — usar esse
+  // já existente evita duplicar.
+  const snap = await getDocs(collection(bd, "espacos", espacoId, "locais"));
+  const existente = snap.docs.find((d) => normalizarTexto(d.data().nome) === normalizarTexto(NOME_LOCAL_NAO_INFORMADO));
+  if (existente) return existente.id;
+  const ref = await addDoc(collection(bd, "espacos", espacoId, "locais"), { nome: NOME_LOCAL_NAO_INFORMADO, endereco: null, cidade: null });
+  return ref.id;
+}
+// Item cadastrado antes do campo "Local" existir não tem localId — assume "Não informado" pra
+// não deixar o cadastro incompleto, sem mexer em mais nada (a semente de historicoPrecos
+// continua com origemCadastro:true, só ganha o localId que faltava).
+async function garantirLocalPadraoEmItens(espacoId, naoInformadoId) {
+  const snapItens = await getDocs(collection(bd, "espacos", espacoId, "itens"));
+  const itensSemLocal = snapItens.docs.filter((d) => !d.data().localId);
+  await Promise.allSettled(itensSemLocal.map(async (d) => {
+    await updateDoc(doc(bd, "espacos", espacoId, "itens", d.id), { localId: naoInformadoId, localNome: NOME_LOCAL_NAO_INFORMADO });
+    const snapHist = await getDocs(collection(bd, "espacos", espacoId, "itens", d.id, "historicoPrecos"));
+    const semente = snapHist.docs.find((h) => h.data().origemCadastro && !h.data().localId);
+    if (semente) await updateDoc(doc(bd, "espacos", espacoId, "itens", d.id, "historicoPrecos", semente.id), { localId: naoInformadoId });
+  }));
 }
 
 function assinarUsuarioEEspaco(uid) {
@@ -763,6 +870,55 @@ async function renderSugestoesItemLista(query) {
 }
 
 /* ---------- dashboard (Início) ---------- */
+// Preferência (Configurações) de período dos rankings da Início (Grupos/Itens/Locais mais
+// utilizados) — "Valor provisionado" e "Lista (Pendente)" não entram aqui, são sobre listas ainda
+// PENDENTES, não sobre compras finalizadas, então o período não se aplica a eles.
+const OPCOES_PERIODO_DASHBOARD = [
+  { valor: "mes", rotulo: "Somente o mês atual" },
+  { valor: "todas", rotulo: "Todas as compras finalizadas" },
+];
+function preferenciaPeriodoDashboard() {
+  try { return localStorage.getItem("prefPeriodoDashboard") || "mes"; } catch { return "mes"; }
+}
+function renderOpcoesPeriodoDashboard() {
+  const atual = preferenciaPeriodoDashboard();
+  const container = $("#opcoes-periodo-dashboard");
+  container.innerHTML = OPCOES_PERIODO_DASHBOARD
+    .map((o) => `<div class="detalhe-linha opcao-periodo-dashboard" data-valor="${o.valor}">
+      <span class="rotulo">${esc(o.rotulo)}</span>
+      <span class="radio-marca ${o.valor === atual ? "selecionado" : ""}"></span>
+    </div>`)
+    .join("");
+  container.querySelectorAll(".opcao-periodo-dashboard").forEach((el) => {
+    el.onclick = () => {
+      try { localStorage.setItem("prefPeriodoDashboard", el.dataset.valor); } catch {}
+      renderOpcoesPeriodoDashboard();
+      renderDashboard();
+    };
+  });
+}
+// "Olhinho" de privacidade dos dashboards (Grupos/Itens/Locais mais utilizados): variável comum
+// (não localStorage) de propósito — sempre começa fechado (nomes ocultos) a cada carregamento do
+// app, mas continua aberto ao navegar entre telas e voltar pra Início dentro da mesma sessão, já
+// que só é reatribuída aqui.
+let dashboardNomesVisiveis = false;
+function alternarPrivacidadeDashboard() {
+  dashboardNomesVisiveis = !dashboardNomesVisiveis;
+  atualizarBotaoPrivacidadeDashboard();
+}
+function atualizarBotaoPrivacidadeDashboard() {
+  $("#tela-inicio main").classList.toggle("oculta-nomes-dashboard", !dashboardNomesVisiveis);
+  const btn = $("#btn-toggle-nomes-dashboard");
+  btn.setAttribute("aria-pressed", String(dashboardNomesVisiveis));
+  btn.setAttribute("aria-label", dashboardNomesVisiveis ? "Ocultar nomes nos dashboards" : "Mostrar nomes nos dashboards");
+  btn.querySelector(".icone-olho-aberto").classList.toggle("hidden", !dashboardNomesVisiveis);
+  btn.querySelector(".icone-olho-fechado").classList.toggle("hidden", dashboardNomesVisiveis);
+}
+// Descarta qualquer render em andamento assim que outro começa — necessário porque o cálculo
+// "mês atual" é assíncrono (busca itensLista de cada lista finalizada do mês) e renderDashboard
+// dispara toda hora (a cada mudança em listasAtuais/itensAtuais); sem isso, uma resposta lenta de
+// um render antigo podia sobrescrever a tela por cima de um resultado mais novo.
+let dashboardRenderToken = 0;
 function renderDashboard() {
   // "Pendente" aqui é "ainda não finalizada" (finalizadaEm), não "status comprada" — uma lista
   // com todos os itens já marcados, mas ainda sem finalizar, continua editável normalmente.
@@ -772,10 +928,14 @@ function renderDashboard() {
 
   renderCarrosselProximaCompra(pendentes);
 
-  getDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral")).then((snap) => {
-    const geral = snap.exists() ? snap.data() : {};
+  const meuToken = ++dashboardRenderToken;
+  const promessaAgregados = preferenciaPeriodoDashboard() === "mes"
+    ? computarAgregadosDoMesAtual()
+    : getDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral")).then((snap) => (snap.exists() ? snap.data() : {}));
+  promessaAgregados.then((geral) => {
+    if (meuToken !== dashboardRenderToken) return;
     const totalCompras = geral.totalComprasFinalizadas || 0;
-    renderRankingItensPorQuantidade(geral.quantidadeItens || {}, geral.unidadeItens || {});
+    renderRankingItensPorQuantidade(geral.quantidadeItens || {});
     renderRankingDashboard("#dash-grupos-mais", geral.grupos || {}, (nome) => nome, "#dash-barra-grupos", totalCompras, geral.ultimaCompraGrupos || {});
     renderRankingDashboard("#dash-locais-mais", geral.locais || {}, (id) => locaisAtuais.find((l) => l.id === id)?.nome || id, undefined, totalCompras);
   }).catch(() => {});
@@ -810,14 +970,13 @@ function renderCarrosselProximaCompra(pendentes) {
     $("#dash-itens-pendentes").textContent = String(Math.max((lista.qtdItens || 0) - (lista.qtdComprados || 0), 0));
     pontos.querySelectorAll("span").forEach((s, i) => s.classList.toggle("ativo", i === idx));
     carrossel.dataset.idSelecionado = lista.id;
-    // Cor unificada com o badge da tela de Listas: azul só quando vazia (lista recém-criada,
-    // sem nenhum item ainda), vermelha quando existe QUALQUER item ainda não comprado (pendente
-    // ou parcial contam igual), laranja quando tudo já foi comprado mas ainda falta finalizar
-    // (a lista só sai daqui quando finalizada de verdade — ver filtro de `pendentes`).
-    const status = lista.status || "pendente";
-    const temItens = (lista.qtdItens || 0) > 0;
-    $("#card-lista-proxima").classList.toggle("status-pendente", temItens && status !== "comprada");
-    $("#card-lista-proxima").classList.toggle("status-aguardando-finalizacao", status === "comprada");
+    // Cor unificada com o badge da tela de Listas (ver statusVisualLista): azul só quando vazia,
+    // vermelha só quando nada foi marcado ainda, laranja assim que existe pelo menos 1 item
+    // marcado — a lista só sai daqui quando finalizada de verdade (ver filtro de `pendentes`),
+    // então "comprada" (verde) nunca acontece nesse card.
+    const classeStatus = statusVisualLista(lista).classe;
+    $("#card-lista-proxima").classList.toggle("status-pendente", classeStatus === "pendente");
+    $("#card-lista-proxima").classList.toggle("status-aguardando-finalizacao", classeStatus === "aguardando-finalizacao");
   }
 
   let timeoutScrollProxima = null;
@@ -877,7 +1036,7 @@ function renderRankingDashboard(seletorLista, mapa, resolverNome, seletorBarra, 
 // documentos não é estável entre leituras, e o desempate não tinha mais nenhum critério depois
 // disso. Quantidade é um número gravado (não depende de ordem de leitura) e o nome como
 // desempate final garante a mesma ordem sempre que duas quantidades empatam.
-function renderRankingItensPorQuantidade(mapaQuantidade, mapaUnidade) {
+function renderRankingItensPorQuantidade(mapaQuantidade) {
   const container = $("#dash-itens-mais");
   const entradas = Object.entries(mapaQuantidade)
     .sort((a, b) => {
@@ -896,13 +1055,12 @@ function renderRankingItensPorQuantidade(mapaQuantidade, mapaUnidade) {
   container.innerHTML = entradas
     .map(([itemId, quantidade], i) => {
       const nome = itensAtuais.find((it) => it.id === itemId)?.nome || itemId;
-      const unidade = mapaUnidade[itemId];
       const numero = quantidade.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
       const pct = total ? Math.round((quantidade / total) * 100) : 0;
       return `<div class="item-aplicacao">
         <span class="dot" style="background:${CORES_RANKING[i % CORES_RANKING.length]}"></span>
         <span class="nome">${esc(nome)}</span>
-        <span class="valor">${numero}${unidade ? ` ${esc(abreviarUnidade(unidade))}` : ""}</span>
+        <span class="valor">${numero}</span>
         <span class="percentual">${pct}%</span>
       </div>`;
     })
@@ -1002,6 +1160,32 @@ function atualizarTotalListasMes() {
     .reduce((s, l) => s + (l.valorTotalPago || 0), 0);
   el.textContent = formatarMoeda(total);
 }
+// Rótulo/cor do badge de status de uma lista — mesmo critério em toda parte que mostra o status
+// (card da tela Listas de Compras, cabeçalho da lista aberta, card "Lembrete de Compras" da
+// Início). Cor: vermelho só quando nada foi marcado ainda, laranja assim que existe pelo menos 1
+// item marcado (mesmo que faltem outros, ou mesmo já com todos marcados) e verde só depois de
+// finalizada de fato (confirmarFinalizar) — pra não parecer concluída antes da hora. Rótulo: as
+// duas situações "laranja" têm nomes diferentes ("Parcial" com itens faltando, "Não finalizada"
+// com tudo já marcado) mesmo tendo a mesma cor, porque "Comprada" como rótulo único pra ambas só
+// confundia (parecia concluída antes da hora).
+function statusVisualLista(lista) {
+  const status = lista.status || "pendente";
+  const rotulo = lista.finalizadaEm
+    ? "Concluída"
+    : status === "pendente"
+      ? "Pendente"
+      : status === "comprada"
+        ? "Não finalizada"
+        : "Parcial";
+  const classe = (lista.qtdItens || 0) === 0
+    ? "vazia"
+    : lista.finalizadaEm
+      ? "comprada"
+      : status === "pendente"
+        ? "pendente"
+        : "aguardando-finalizacao";
+  return { rotulo, classe };
+}
 function renderCarrosselListas() {
   atualizarTotalListasMes();
   const container = $("#carrossel-listas");
@@ -1020,17 +1204,7 @@ function renderCarrosselListas() {
   container.innerHTML = ordenadas
     .map((l) => {
       const status = l.status || "pendente";
-      const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
-      // Cor unificada com o card "Lembrete de Compras" da tela inicial: azul só quando vazia
-      // (lista recém-criada, sem nenhum item ainda), vermelha quando existe QUALQUER item ainda
-      // não comprado (pendente ou parcial contam igual), laranja quando tudo já foi comprado mas
-      // ainda falta finalizar, e verde só depois de finalizada de fato (confirmarFinalizar) —
-      // pra não parecer concluída antes da hora.
-      const classeVisual = (l.qtdItens || 0) === 0
-        ? "vazia"
-        : status === "comprada"
-          ? (l.finalizadaEm ? "comprada" : "aguardando-finalizacao")
-          : "pendente";
+      const { rotulo: rotuloStatus, classe: classeVisual } = statusVisualLista(l);
       const comprados = l.qtdComprados || 0;
       const pendentes = Math.max((l.qtdItens || 0) - comprados, 0);
       // Concluída: mostra provisionado (o esperado ORIGINAL de cada item, congelado no momento em
@@ -1062,7 +1236,7 @@ function renderCarrosselListas() {
           <span class="badge-status ${classeVisual}">${l.permanente ? "Permanente" : rotuloStatus}</span>
         </div>
         <div class="card-lista-rodape">
-          <span>${l.qtdItens || 0} Item${(l.qtdItens || 0) === 1 ? "" : "s"}</span>
+          <span>${l.qtdItens || 0} ${(l.qtdItens || 0) === 1 ? "Item" : "Itens"}</span>
           <span class="valor">${formatarMoeda(valorTopo)}</span>
         </div>
         <div class="card-lista-resumo-itens">
@@ -1127,7 +1301,7 @@ async function salvarLista() {
   }
   const parecida = id ? null : encontrarNomeParecido(nome, listasAtuais);
   if (parecida) {
-    const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[parecida.status || "pendente"];
+    const rotuloStatus = statusVisualLista(parecida).rotulo;
     const confirma = confirmarApesarDeParecido([
       `Nome: ${parecida.nome}`,
       `Status: ${parecida.permanente ? "Permanente" : rotuloStatus}`,
@@ -1174,33 +1348,55 @@ async function recomputarEstatisticasSeguro(contexto) {
     alert(`Não foi possível atualizar os dashboards agora (${contexto}). Os dados da lista foram salvos normalmente. Detalhe do erro: ${e?.message || e}`);
   }
 }
+// Acumula grupos/locais/quantidades de UMA lista (itensLista já carregados) num acumulador
+// compartilhado — usado tanto no recálculo geral (todas as listas finalizadas, persistido em
+// "estatisticas/geral") quanto no cálculo sob demanda do dashboard "só o mês atual" (não
+// persistido, ver computarAgregadosDoMesAtual), pra não duplicar essa regra em dois lugares.
+function novoAcumuladorAgregados() {
+  return { contagemGrupos: {}, contagemLocais: {}, quantidadeItens: {}, unidadeItens: {}, ultimaCompraGrupos: {} };
+}
+function acumularAgregadosDeItensLista(todosItens, acc) {
+  const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
+  // Grupos e locais: por ocorrência (1 por compra em que apareceu) — não deixa algo comprado em
+  // grande quantidade, mas raramente, dominar o ranking de frequência.
+  comprados.forEach((i) => {
+    const dataCompra = i.compradoEm || "";
+    acc.quantidadeItens[i.itemId] = (acc.quantidadeItens[i.itemId] || 0) + (i.quantidade || 0);
+    acc.unidadeItens[i.itemId] = i.unidade;
+    acc.contagemLocais[i.localCompraId] = (acc.contagemLocais[i.localCompraId] || 0) + 1;
+    const grupo = i.grupoNome || "Outros";
+    acc.contagemGrupos[grupo] = (acc.contagemGrupos[grupo] || 0) + 1;
+    // Data da compra mais recente de cada grupo — desempata o ranking quando duas chaves têm a
+    // mesma contagem (sem isso, o empate ficava na ordem meio arbitrária em que o Firestore
+    // devolve os documentos, sem nenhum critério visível pra quem está olhando o dashboard).
+    if (dataCompra > (acc.ultimaCompraGrupos[grupo] || "")) acc.ultimaCompraGrupos[grupo] = dataCompra;
+  });
+}
+// Dashboard "só o mês atual" (preferência em Configurações) — calculado na hora a partir de
+// listasAtuais (já carregado, sem precisar de outro getDocs) e não é persistido em lugar nenhum,
+// diferente de "estatisticas/geral" (que cobre todas as listas finalizadas e é recalculado só nos
+// eventos que mudam quais listas contam como finalizadas — ver recomputarEstatisticasELista).
+async function computarAgregadosDoMesAtual() {
+  const doMes = listasAtuais.filter((l) => l.finalizadaEm && mesAnoDoTimestamp(l.finalizadaEm) === mesAnoAtual());
+  const acc = novoAcumuladorAgregados();
+  for (const lista of doMes) {
+    const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
+    acumularAgregadosDeItensLista(snap.docs.map((d) => d.data()), acc);
+  }
+  return {
+    grupos: acc.contagemGrupos, locais: acc.contagemLocais, totalComprasFinalizadas: doMes.length,
+    ultimaCompraGrupos: acc.ultimaCompraGrupos, quantidadeItens: acc.quantidadeItens, unidadeItens: acc.unidadeItens,
+  };
+}
 async function recomputarEstatisticasELista() {
   const snapListas = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas"));
   const finalizadas = snapListas.docs.map((d) => ({ id: d.id, ...d.data() })).filter((l) => l.finalizadaEm);
-  const contagemGrupos = {}, contagemLocais = {};
-  // "Itens mais comprados" é por quantidade/unidade somada (2kg de arroz aparece como "2kg"), não
-  // por ocorrência — ver renderRankingItensPorQuantidade.
-  const quantidadeItens = {}, unidadeItens = {};
-  // Data da compra mais recente de cada grupo — desempata o ranking quando duas chaves têm a
-  // mesma contagem (sem isso, o empate ficava na ordem meio arbitrária em que o Firestore devolve
-  // os documentos, sem nenhum critério visível pra quem está olhando o dashboard).
-  const ultimaCompraGrupos = {};
+  const acc = novoAcumuladorAgregados();
   const atualizacoesPorLista = [];
   for (const lista of finalizadas) {
     const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"));
     const todosItens = snap.docs.map((d) => d.data());
-    const comprados = todosItens.filter((i) => i.comprado && i.valorPago > 0 && i.localCompraId);
-    // Grupos e locais: por ocorrência (1 por compra em que apareceu) — não deixa algo comprado em
-    // grande quantidade, mas raramente, dominar o ranking de frequência.
-    comprados.forEach((i) => {
-      const dataCompra = i.compradoEm || "";
-      quantidadeItens[i.itemId] = (quantidadeItens[i.itemId] || 0) + (i.quantidade || 0);
-      unidadeItens[i.itemId] = i.unidade;
-      contagemLocais[i.localCompraId] = (contagemLocais[i.localCompraId] || 0) + 1;
-      const grupo = i.grupoNome || "Outros";
-      contagemGrupos[grupo] = (contagemGrupos[grupo] || 0) + 1;
-      if (dataCompra > (ultimaCompraGrupos[grupo] || "")) ultimaCompraGrupos[grupo] = dataCompra;
-    });
+    acumularAgregadosDeItensLista(todosItens, acc);
     // Também corrige o "Provisionado" dessa lista (usado na "Diferença" do resumo) — itens
     // lançados antes de "subtotalProvisionado" existir têm o valor original reconstruído aqui.
     const qtdItens = somaQuantidades(todosItens);
@@ -1216,8 +1412,8 @@ async function recomputarEstatisticasELista() {
   // "estatisticas/geral" desatualizado e sobrescrever a tela com dados velhos/vazios por cima do
   // resultado certo. Gravando primeiro, qualquer render (o meu ou o do listener) já lê o final.
   await setDoc(doc(bd, "espacos", espacoIdAtual, "estatisticas", "geral"), {
-    grupos: contagemGrupos, locais: contagemLocais, totalComprasFinalizadas: finalizadas.length,
-    ultimaCompraGrupos, quantidadeItens, unidadeItens,
+    grupos: acc.contagemGrupos, locais: acc.contagemLocais, totalComprasFinalizadas: finalizadas.length,
+    ultimaCompraGrupos: acc.ultimaCompraGrupos, quantidadeItens: acc.quantidadeItens, unidadeItens: acc.unidadeItens,
   });
   for (const { id, dados } of atualizacoesPorLista) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", id), dados);
@@ -1272,7 +1468,9 @@ function abrirListaDetalhe(lista) {
   if (!lista) return;
   listaAbertaId = lista.id;
   filtroGrupoLista = null;
-  ordenacaoListaFinalizada = null;
+  // Lista já finalizada abre direto ordenada por nome (A-Z) — é o que faz mais sentido pra
+  // conferir o que foi comprado; pendente não usa essa ordenação então o valor não importa.
+  ordenacaoListaFinalizada = lista.finalizadaEm ? "nome" : null;
   direcaoOrdenacaoListaFinalizada = "asc";
   ultimoLocalUsadoId = null;
   carregarLocalMaisUsado();
@@ -1470,11 +1668,7 @@ function renderListaDetalhe() {
   const lista = listaAbertaAtual();
   if (!lista) return;
 
-  const status = lista.status || "pendente";
-  const rotuloStatus = { pendente: "Pendente", parcial: "Compra parcial", comprada: "Comprada" }[status];
-  // Mesma regra do card da lista de compras: sem nenhum item ainda, fica neutra em vez de
-  // vermelha mesmo com status "pendente".
-  const classeVisualStatus = (lista.qtdItens || 0) === 0 ? "vazia" : status;
+  const { rotulo: rotuloStatus, classe: classeVisualStatus } = statusVisualLista(lista);
 
   const gruposDaLista = [...new Set(itensListaAtuais.map((i) => i.grupoNome).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   renderChips("#filtros-lista-grupo", gruposDaLista, filtroGrupoLista, (v) => { filtroGrupoLista = v; renderListaDetalhe(); });
@@ -1604,6 +1798,9 @@ function renderListaDetalhe() {
   }
 
   $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
+  // Só deixa clicar em "Finalizar compra" com pelo menos 1 item já marcado — finalizar uma lista
+  // sem nada comprado não faz sentido (viraria uma compra "vazia" no histórico).
+  $("#btn-finalizar-compra").disabled = !(lista.qtdComprados > 0);
   $("#btn-reabrir-lista").classList.toggle("hidden", !lista.finalizadaEm);
 }
 async function reabrirLista() {
@@ -1669,27 +1866,27 @@ async function valorProvisionadoComOrigem(item) {
   const snap = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", item.id, "historicoPrecos"));
   const registros = snap.docs.map((d) => d.data());
   const tendencia = tendenciaDeRegistros(registros);
-  if (preferencia === "cadastro") return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  if (preferencia === "cadastro") return { valor: item.valor || 0, origem: "cadastro", localId: item.localId || null, tendencia };
   // "Último comprado"/"mais barato" só valem quando já existe histórico de fato; sem nenhuma
   // compra finalizada ainda, sempre cai no valor do cadastro (ou 0, se também não tiver).
-  if (snap.empty) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  if (snap.empty) return { valor: item.valor || 0, origem: "cadastro", localId: item.localId || null, tendencia };
   if (preferencia === "barato") {
     // A linha-semente do cadastro participa de propósito da disputa por "mais barato" (ver
     // comentário em confirmarFinalizar) — mas se for ela quem vence, mostra como "cadastro"
     // mesmo (sem local), já que não é uma compra de verdade.
     const comValor = registros.filter((r) => (r.valor || 0) > 0);
-    if (!comValor.length) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+    if (!comValor.length) return { valor: item.valor || 0, origem: "cadastro", localId: item.localId || null, tendencia };
     const maisBarato = comValor.reduce((min, r) => (r.valor < min.valor ? r : min));
-    if (maisBarato.origemCadastro) return { valor: maisBarato.valor, origem: "cadastro", localId: null, tendencia };
+    if (maisBarato.origemCadastro) return { valor: maisBarato.valor, origem: "cadastro", localId: item.localId || null, tendencia };
     return { valor: maisBarato.valor, origem: "barato", localId: maisBarato.localId || null, tendencia };
   }
   // "Último comprado" só conta compra de fato — a linha-semente do cadastro nunca deve aparecer
   // como se fosse "a última compra" (ela não é uma compra real, é só o valor de cadastro
   // guardado como referência pra tendência e pro "mais barato").
   const comprasReais = registros.filter((r) => !r.origemCadastro);
-  if (!comprasReais.length) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  if (!comprasReais.length) return { valor: item.valor || 0, origem: "cadastro", localId: item.localId || null, tendencia };
   const maisRecente = comprasReais.sort((a, b) => b.data.localeCompare(a.data))[0];
-  if (!maisRecente.valor) return { valor: item.valor || 0, origem: "cadastro", localId: null, tendencia };
+  if (!maisRecente.valor) return { valor: item.valor || 0, origem: "cadastro", localId: item.localId || null, tendencia };
   return { valor: maisRecente.valor, origem: "ultimo", localId: maisRecente.localId || null, tendencia };
 }
 async function valorProvisionadoParaItem(item) {
@@ -1854,7 +2051,6 @@ async function carregarLocalMaisUsado() {
     localMaisUsadoId = null;
   }
 }
-const ROTULOS_ORIGEM_VALOR = { cadastro: "Valor do cadastro", ultimo: "Último comprado", barato: "Mais barato registrado" };
 // Compara o que está sendo digitado em "Valor pago" com o último valor considerado (mostrado
 // acima) e atualiza a setinha ao vivo: verde/para baixo se ficou mais barato, vermelha/pra cima
 // se ficou mais caro — some se não há referência ainda ou o valor bate exatamente.
@@ -1946,13 +2142,12 @@ async function abrirModalComprar(itemListaId) {
   $("#mc-valor").value = origemValor.valor ? formatarMoeda(origemValor.valor) : "";
   atualizarDiferencaValorComprar();
   atualizarLegendaValorTotalComprar();
-  // O prefixo "Último valor considerado" deixa claro que é isso que foi usado pra pré-preencher o
-  // campo acima (conforme a preferência em Configurações), não necessariamente a última compra feita.
+  // Mesma flag azul usada no Detalhes/Histórico do item: mostra "Cadastro" quando o valor não tem
+  // um local real por trás (local do cadastro ainda em "Não informado"), senão o nome do local de
+  // onde esse valor veio de fato.
   const nomeLocal = origemValor.localId ? locaisAtuais.find((l) => l.id === origemValor.localId)?.nome : null;
-  const detalheOrigem = origemValor.origem === "cadastro"
-    ? "Valor do cadastro"
-    : `${ROTULOS_ORIGEM_VALOR[origemValor.origem]}${nomeLocal ? ` · ${nomeLocal}` : ""}`;
-  if (referenciaEl) referenciaEl.textContent = `Último valor considerado — ${detalheOrigem}: ${formatarMoeda(origemValor.valor)}`;
+  const textoFlag = nomeLocal && normalizarTexto(nomeLocal) !== normalizarTexto(NOME_LOCAL_NAO_INFORMADO) ? nomeLocal : "Cadastro";
+  if (referenciaEl) referenciaEl.innerHTML = `<span>Último valor:</span> <span class="badge-mini">${esc(textoFlag)}</span> <span>${esc(formatarMoeda(origemValor.valor))}</span>`;
 }
 function fecharModalComprar() {
   $("#overlay-comprar").classList.add("hidden");
@@ -2198,9 +2393,9 @@ async function confirmarFinalizar() {
       localId: i.localCompraId, valor: i.valorPago, data: i.compradoEm || hojeISO(), listaId: listaAbertaId,
     })];
     if (historicosVazios[idx]) {
-      const valorCadastro = itensAtuais.find((it) => it.id === i.itemId)?.valor || 0;
+      const itemCadastro = itensAtuais.find((it) => it.id === i.itemId);
       gravacoes.push(addDoc(collection(bd, "espacos", espacoIdAtual, "itens", i.itemId, "historicoPrecos"), {
-        localId: null, valor: valorCadastro, data: "2000-01-01", listaId: null, origemCadastro: true,
+        localId: itemCadastro?.localId || null, valor: itemCadastro?.valor || 0, data: "2000-01-01", listaId: null, origemCadastro: true,
       }));
     }
     return gravacoes;
@@ -2231,7 +2426,7 @@ async function renderCadastroItens() {
   // grupo, e limitar à aba "Todos" implicitamente é mais previsível do que manter o recorte.
   if (termo) lista = lista.filter((i) => itemCombinaComBusca(i, termo));
   else if (filtroGrupoItens) lista = lista.filter((i) => i.grupoNome === filtroGrupoItens);
-  $("#total-itens").textContent = `${lista.length} Item${lista.length === 1 ? "" : "s"}`;
+  $("#total-itens").textContent = `${lista.length} ${lista.length === 1 ? "Item" : "Itens"}`;
   const container = $("#lista-cadastro-itens");
   if (lista.length === 0) {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhum item encontrado." : "Nenhum item cadastrado."}</div>`;
@@ -2379,25 +2574,33 @@ async function abrirItemDetalhe(item, origemTela) {
   $(".tab[data-tab='cadastro']").click();
 
   // "Valor" já sai dinâmico direto — conforme a preferência (Configurações) e o histórico de
-  // preços atualizado a cada compra, em vez de mostrar sempre o número fixo do cadastro.
+  // preços atualizado a cada compra, em vez de mostrar sempre o número fixo do cadastro. A linha
+  // "Local" logo abaixo mostra de onde esse valor veio (substitui a antiga linha "Comprado em") —
+  // "Local" do cadastro do item em si não aparece mais fora daqui, só no Histórico.
   const origemValor = await valorProvisionadoComOrigem(item);
-  const linhasValorConsiderado = [
-    ["Valor", formatarMoeda(origemValor.valor)],
-  ];
-  if (origemValor.localId) {
-    linhasValorConsiderado.push(["Comprado em", locaisAtuais.find((l) => l.id === origemValor.localId)?.nome || "—"]);
-  }
+  const nomeLocalValor = origemValor.localId ? locaisAtuais.find((l) => l.id === origemValor.localId)?.nome : null;
+  const linhaValor = `<div class="detalhe-bloco-valor">
+    <div class="detalhe-linha detalhe-linha-valor">
+      <span class="rotulo">Valor</span>
+      <span class="valor-detalhe"><strong>${esc(formatarMoeda(origemValor.valor))}</strong></span>
+    </div>
+    <div class="detalhe-linha detalhe-linha-valor">
+      <span class="rotulo">Local</span>
+      <span class="valor-detalhe">${nomeLocalValor ? `<span class="badge-mini">${esc(nomeLocalValor)}</span>` : "—"}</span>
+    </div>
+    <p class="detalhe-valor-aviso">Valor e local são dinâmicos, atualizados a cada compra.</p>
+  </div>`;
 
   $("#item-detalhe-info").innerHTML =
     [
       ["Nome", item.nome],
       ["Marca", item.marca || "—"],
       ["Descrição", item.descricao || "—"],
-      ["Descrição da unidade", item.descricaoUnidade || "—"],
-      ...linhasValorConsiderado,
-      ["Grupo", item.grupoNome || "—"],
       ["Unidade", item.unidade],
+      ["Descrição da unidade", item.descricaoUnidade || "—"],
+      ["Grupo", item.grupoNome || "—"],
     ].map(([r, v]) => `<div class="detalhe-linha"><span class="rotulo">${esc(r)}</span><span class="valor-detalhe">${esc(String(v))}</span></div>`).join("") +
+    linhaValor +
     `<button class="btn-secundario" id="btn-editar-item-catalogo" style="margin-top:14px">✏️ Editar item</button>`;
   $("#btn-editar-item-catalogo").onclick = () => abrirFormEditarItem(item);
   renderImagemItemDetalhe(item.fotoUrl || null);
@@ -2426,12 +2629,27 @@ async function renderHistoricoItem(item) {
   $("#hist-menor").textContent = valores.length ? formatarMoeda(Math.min(...valores)) : "—";
   $("#hist-maior").textContent = valores.length ? formatarMoeda(Math.max(...valores)) : "—";
   $("#hist-media").textContent = valores.length ? formatarMoeda(valores.reduce((s, v) => s + v, 0) / valores.length) : "—";
+  // A linha-semente do cadastro guarda a data "2000-01-01" de propósito (pra nunca ser confundida
+  // com a compra mais recente nas comparações de tendência/mais barato) — mas pra exibir pro
+  // usuário, mostra a data de criação do espaço (a "data que cadastrei isso no app") em vez do
+  // valor interno, sem tocar no que está gravado.
+  const dataCadastroExibida = dataISODoTimestamp(espacoAtual.criadoEm);
+  // Ícone em SVG (stroke=currentColor) em vez do emoji 🗑️ — emoji renderiza sempre colorido,
+  // ignorando CSS, e aqui precisamos diferenciar visualmente lixeira ativa (azul) de inativa
+  // (cinza, na linha do cadastro, que nunca pode ser excluída).
+  const ICONE_LIXEIRA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M4 7h16"/><path d="M9 7V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V7"/><path d="M6 7l1 12.5a2 2 0 0 0 2 1.8h6a2 2 0 0 0 2-1.8L18 7"/><path d="M10 11v6M14 11v6"/></svg>`;
+  const cabecalho = `<div class="linha-historico linha-historico-cabecalho">
+        <span class="local">Local</span>
+        <span class="data">Data</span>
+        <span class="valor">Valor</span>
+        <span class="btn-excluir-historico" style="visibility:hidden">${ICONE_LIXEIRA}</span>
+      </div>`;
   $("#tabela-historico").innerHTML = ultimos.length
-    ? ultimos.map((h) => `<div class="linha-historico">
-        <span class="local">${h.origemCadastro ? "Valor do cadastro" : esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span>
+    ? cabecalho + ultimos.map((h) => `<div class="linha-historico">
+        <span class="local"><span class="badge-mini">${esc(locaisAtuais.find((l) => l.id === h.localId)?.nome || "—")}</span></span>
+        <span class="data">${formatarDataBR(h.origemCadastro ? dataCadastroExibida : h.data)}</span>
         <span class="valor">${formatarMoeda(h.valor)}</span>
-        <span class="data">${h.origemCadastro ? "Cadastro" : formatarDataBR(h.data)}</span>
-        ${h.origemCadastro ? "" : `<button class="btn-excluir-historico" data-local-id="${h.localId}" aria-label="Excluir registro">🗑️</button>`}
+        <button class="btn-excluir-historico${h.origemCadastro ? "" : " ativo"}" data-local-id="${h.localId}" aria-label="Excluir registro" ${h.origemCadastro ? "disabled" : ""}>${ICONE_LIXEIRA}</button>
       </div>`).join("")
     : `<div class="vazio">Nenhuma compra registrada ainda para este item.</div>`;
 
@@ -2465,17 +2683,24 @@ function abrirFormNovoItem() {
   $("#fi-grupo-nome").value = "";
   $("#fi-grupo-id").value = "";
   $("#fi-unidade").value = "";
+  // Local vem pré-marcado como "Não informado" — diferente de Grupo/Unidade, que começam vazios —
+  // porque na prática quase ninguém sabe de antemão onde vai comprar um item recém-cadastrado.
+  const localPadrao = locaisAtuais.find((l) => l.nome === NOME_LOCAL_NAO_INFORMADO);
+  $("#fi-local-nome").value = localPadrao?.nome || "";
+  $("#fi-local-id").value = localPadrao?.id || "";
   $("#btn-excluir-item").classList.add("hidden");
   $("#fi-nome-sugestoes").classList.add("hidden");
   $("#fi-grupo-sugestoes").classList.add("hidden");
   $("#fi-unidade-sugestoes").classList.add("hidden");
+  $("#fi-local-sugestoes").classList.add("hidden");
   mostrarMsg("#msg-form-item", "", "");
   mostrarTelaCheia("form-item", "Novo item");
 }
 
-// Grupo e Unidade são listas pequenas e fechadas — ao focar o campo vazio, mostra todas as
-// opções cadastradas (não precisa digitar nada pra escolher); nunca vem pré-selecionado, só
-// conta como escolhido ao clicar numa sugestão.
+// Grupo, Unidade e Local são listas pequenas e fechadas — ao focar o campo vazio, mostra todas as
+// opções cadastradas (não precisa digitar nada pra escolher); Grupo/Unidade nunca vêm
+// pré-selecionados (só contam como escolhidos ao clicar numa sugestão), Local é a exceção — ver
+// abrirFormNovoItem/abrirFormEditarItem.
 function renderSugestoesGrupo(query) {
   const container = $("#fi-grupo-sugestoes");
   const termo = query.trim().toLowerCase();
@@ -2512,6 +2737,28 @@ function renderSugestoesUnidade(query) {
   container.querySelectorAll(".autocomplete-item").forEach((el) => {
     el.onclick = () => {
       $("#fi-unidade").value = el.dataset.unidade;
+      container.classList.add("hidden");
+      container.innerHTML = "";
+    };
+  });
+}
+function renderSugestoesLocalItem(query) {
+  const container = $("#fi-local-sugestoes");
+  const termo = query.trim().toLowerCase();
+  const encontrados = termo.length < 1 ? locaisAtuais : locaisAtuais.filter((l) => l.nome.toLowerCase().includes(termo));
+  if (encontrados.length === 0) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = encontrados.map((l) => `<div class="autocomplete-item" data-id="${l.id}"><span>${esc(l.nome)}</span></div>`).join("");
+  container.classList.remove("hidden");
+  container.querySelectorAll(".autocomplete-item").forEach((el) => {
+    el.onclick = () => {
+      const local = locaisAtuais.find((l) => l.id === el.dataset.id);
+      if (!local) return;
+      $("#fi-local-nome").value = local.nome;
+      $("#fi-local-id").value = local.id;
       container.classList.add("hidden");
       container.innerHTML = "";
     };
@@ -2557,10 +2804,13 @@ async function abrirFormEditarItem(item) {
   $("#fi-unidade").value = item.unidade;
   $("#fi-grupo-nome").value = item.grupoNome || "";
   $("#fi-grupo-id").value = item.grupoId || "";
+  $("#fi-local-nome").value = item.localNome || "";
+  $("#fi-local-id").value = item.localId || "";
   $("#btn-excluir-item").classList.remove("hidden");
   $("#fi-nome-sugestoes").classList.add("hidden");
   $("#fi-grupo-sugestoes").classList.add("hidden");
   $("#fi-unidade-sugestoes").classList.add("hidden");
+  $("#fi-local-sugestoes").classList.add("hidden");
   mostrarMsg("#msg-form-item", "", "");
   mostrarTelaCheia("form-item", "Editar item");
   // Trava o campo "Valor" assim que existir compra registrada — ele vira dinâmico a partir daí
@@ -2576,6 +2826,8 @@ async function salvarItem() {
   const grupoId = $("#fi-grupo-id").value;
   const grupoNome = gruposAtuais.find((g) => g.id === grupoId)?.nome || null;
   const unidade = unidadesAtuais.find((u) => u.nome.toLowerCase() === $("#fi-unidade").value.trim().toLowerCase())?.nome;
+  const localId = $("#fi-local-id").value;
+  const localNome = locaisAtuais.find((l) => l.id === localId)?.nome || null;
   if (!nome || !grupoId || !grupoNome) {
     mostrarMsg("#msg-form-item", "Digite o nome do grupo e selecione uma das sugestões.", "erro");
     return;
@@ -2584,22 +2836,37 @@ async function salvarItem() {
     mostrarMsg("#msg-form-item", "Digite a unidade e selecione uma das sugestões.", "erro");
     return;
   }
-  const parecido = id ? null : encontrarNomeParecido(nome, itensAtuais);
-  if (parecido) {
-    const confirma = confirmarApesarDeParecido([
-      `Nome: ${parecido.nome}`,
-      parecido.marca ? `Marca: ${parecido.marca}` : null,
-      `Grupo: ${parecido.grupoNome || "—"}`,
-      `Unidade: ${parecido.unidade || "—"}`,
-      parecido.descricaoUnidade ? `Descrição da unidade: ${parecido.descricaoUnidade}` : null,
-      parecido.valor ? `Valor: ${formatarMoeda(parecido.valor)}` : null,
-    ]);
-    if (!confirma) return;
+  if (!localId || !localNome) {
+    mostrarMsg("#msg-form-item", "Digite o local e selecione uma das sugestões.", "erro");
+    return;
   }
   const dados = {
     nome, descricao: $("#fi-descricao").value.trim() || null, descricaoUnidade: $("#fi-descricao-unidade").value.trim() || null,
     valor: paraNumero($("#fi-valor").value), marca: $("#fi-marca").value.trim() || null, grupoId, grupoNome, unidade,
+    localId, localNome,
   };
+  if (!id) {
+    // Item repetido só bloqueia quando TUDO é idêntico (nome, marca, descrição, grupo, unidade,
+    // local e valor) — diferente de grupo/local/unidade/forma, o mesmo nome de item é legítimo
+    // quando é uma variação (marca ou descrição diferente, por exemplo). Nome parecido mas não
+    // 100% idêntico continua só avisando, como antes.
+    if (itensAtuais.some((it) => itemIdenticoAoCadastro(it, dados))) {
+      mostrarMsg("#msg-form-item", "Já existe um item idêntico no catálogo (mesmo nome, marca, descrição, grupo, unidade, local e valor).", "erro");
+      return;
+    }
+    const parecido = encontrarNomeParecido(nome, itensAtuais);
+    if (parecido) {
+      const confirma = confirmarApesarDeParecido([
+        `Nome: ${parecido.nome}`,
+        parecido.marca ? `Marca: ${parecido.marca}` : null,
+        `Grupo: ${parecido.grupoNome || "—"}`,
+        `Unidade: ${parecido.unidade || "—"}`,
+        parecido.descricaoUnidade ? `Descrição da unidade: ${parecido.descricaoUnidade}` : null,
+        parecido.valor ? `Valor: ${formatarMoeda(parecido.valor)}` : null,
+      ]);
+      if (!confirma) return;
+    }
+  }
   $("#btn-salvar-item").disabled = true;
   try {
     if (id) {
@@ -2611,10 +2878,10 @@ async function salvarItem() {
         const snapHist = await getDocs(collection(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos"));
         const semente = snapHist.docs.find((d) => d.data().origemCadastro);
         if (semente) {
-          await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos", semente.id), { valor: dados.valor });
+          await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos", semente.id), { valor: dados.valor, localId: dados.localId });
         } else {
           await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", id, "historicoPrecos"), {
-            localId: null, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
+            localId: dados.localId, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
           });
         }
       }
@@ -2622,7 +2889,7 @@ async function salvarItem() {
     } else {
       const refItem = await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
       await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", refItem.id, "historicoPrecos"), {
-        localId: null, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
+        localId: dados.localId, valor: dados.valor, data: "2000-01-01", listaId: null, origemCadastro: true,
       });
       notificarMembrosEspaco(`${nomeExibicaoUsuario()} cadastrou o item "${nome}".`);
       // Cadastro veio do atalho "+ Cadastrar" de dentro de uma lista (busca sem resultado) —
@@ -2702,14 +2969,10 @@ async function salvarGrupo() {
     mostrarMsg("#msg-form-grupo", "Informe o nome do grupo.", "erro");
     return;
   }
-  const parecido = id ? null : encontrarNomeParecido(nome, gruposAtuais);
-  if (parecido) {
-    const confirma = confirmarApesarDeParecido([
-      `Nome: ${parecido.nome}`,
-      parecido.descricao ? `Descrição: ${parecido.descricao}` : null,
-    ]);
-    if (!confirma) return;
-  }
+  if (!id && !podeSalvarComEsseNome("#msg-form-grupo", nome, gruposAtuais, (p) => [
+    `Nome: ${p.nome}`,
+    p.descricao ? `Descrição: ${p.descricao}` : null,
+  ])) return;
   const dados = { nome, descricao: $("#fg-descricao").value.trim() || null };
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "grupos", id), dados);
@@ -2817,9 +3080,10 @@ async function renderItensMaisBaratosNoLocal(localId) {
     if (melhor.localId === localId) maisBaratosAqui.push({ nome: item.nome, valor: melhor.valor });
   }
 
-  maisBaratosAqui.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  container.innerHTML = maisBaratosAqui.length
-    ? maisBaratosAqui.map((i) => `<div class="item-aplicacao"><span class="nome">${esc(i.nome)}</span><span class="valor">${formatarMoeda(i.valor)}</span></div>`).join("")
+  maisBaratosAqui.sort((a, b) => a.valor - b.valor);
+  const top10 = maisBaratosAqui.slice(0, 10);
+  container.innerHTML = top10.length
+    ? top10.map((i) => `<div class="item-aplicacao"><span class="nome">${esc(i.nome)}</span><span class="valor">${formatarMoeda(i.valor)}</span></div>`).join("")
     : `<div class="dash-vazio">Ainda sem itens em que este local seja o mais barato — precisa comprar o mesmo item em outro local para comparar.</div>`;
 }
 async function salvarLocal() {
@@ -2829,15 +3093,11 @@ async function salvarLocal() {
     mostrarMsg("#msg-form-local", "Informe o nome do local.", "erro");
     return;
   }
-  const parecido = id ? null : encontrarNomeParecido(nome, locaisAtuais);
-  if (parecido) {
-    const confirma = confirmarApesarDeParecido([
-      `Nome: ${parecido.nome}`,
-      parecido.endereco ? `Endereço: ${parecido.endereco}` : null,
-      parecido.cidade ? `Cidade: ${parecido.cidade}` : null,
-    ]);
-    if (!confirma) return;
-  }
+  if (!id && !podeSalvarComEsseNome("#msg-form-local", nome, locaisAtuais, (p) => [
+    `Nome: ${p.nome}`,
+    p.endereco ? `Endereço: ${p.endereco}` : null,
+    p.cidade ? `Cidade: ${p.cidade}` : null,
+  ])) return;
   let site = $("#fl-site").value.trim() || null;
   if (site && !/^https?:\/\//i.test(site)) site = `https://${site}`;
   const dados = { nome, endereco: $("#fl-endereco").value.trim() || null, cidade: $("#fl-cidade").value.trim() || null, site };
@@ -2908,8 +3168,7 @@ async function salvarForma() {
     mostrarMsg("#msg-form-forma", "Informe o nome da forma de pagamento.", "erro");
     return;
   }
-  const parecida = id ? null : encontrarNomeParecido(nome, formasAtuais);
-  if (parecida && !confirmarApesarDeParecido([`Nome: ${parecida.nome}`])) return;
+  if (!id && !podeSalvarComEsseNome("#msg-form-forma", nome, formasAtuais, (p) => [`Nome: ${p.nome}`])) return;
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "formasPagamento", id), { nome });
   } else {
@@ -2987,14 +3246,10 @@ async function salvarUnidade() {
     mostrarMsg("#msg-form-unidade", "Selecione se a unidade aceita quantidade fracionada.", "erro");
     return;
   }
-  const parecida = id ? null : encontrarNomeParecido(nome, unidadesAtuais);
-  if (parecida) {
-    const confirma = confirmarApesarDeParecido([
-      `Nome: ${parecida.nome}`,
-      `Aceita fração: ${parecida.fracionavel ? "Sim" : "Não"}`,
-    ]);
-    if (!confirma) return;
-  }
+  if (!id && !podeSalvarComEsseNome("#msg-form-unidade", nome, unidadesAtuais, (p) => [
+    `Nome: ${p.nome}`,
+    `Aceita fração: ${p.fracionavel ? "Sim" : "Não"}`,
+  ])) return;
   const dados = { nome, fracionavel: fracionavelUnidadeSelecionado === "sim", abreviacao: $("#fu-abreviacao").value.trim() || null };
   if (id) {
     await updateDoc(doc(bd, "espacos", espacoIdAtual, "unidadesMedida", id), dados);
@@ -3024,7 +3279,13 @@ function renderMembros() {
   const container = $("#lista-membros");
   const entradas = Object.values(membros);
   container.innerHTML = entradas.length
-    ? entradas.map((m) => `<div class="linha-membro"><span class="nome">${esc(m.nome || m.email)}</span><span>${esc(m.email)}</span></div>`).join("")
+    ? entradas.map((m) => `<div class="linha-membro">
+        <div class="avatar-membro">${esc((m.nome || m.email || "?").trim()[0].toUpperCase())}</div>
+        <div class="info">
+          <span class="nome">${esc(m.nome || m.email)}</span>
+          ${m.nome ? `<span class="email">${esc(m.email)}</span>` : ""}
+        </div>
+      </div>`).join("")
     : `<div class="vazio">Nenhum membro encontrado.</div>`;
 }
 function renderConvitesPendentes() {
@@ -3032,7 +3293,11 @@ function renderConvitesPendentes() {
   const container = $("#lista-convites");
   container.innerHTML = pendentes.length
     ? pendentes.map((c) => `<div class="linha-convite-pendente" data-id="${c.id}">
-        <span class="nome">${esc(c.deEmail)}</span>
+        <div class="avatar-membro">${esc((c.deEmail || "?").trim()[0].toUpperCase())}</div>
+        <div class="info">
+          <span class="nome">${esc(c.deEmail)}</span>
+          <span class="email">Convite enviado</span>
+        </div>
         <div class="acoes">
           <button data-acao="aceitar" class="aceitar">Aceitar</button>
           <button data-acao="recusar">Recusar</button>
@@ -3227,6 +3492,20 @@ const TITULOS_TELA_PRINCIPAL = {
   compartilhadas: "Participantes", configuracoes: "Configurações", seguranca: "Segurança",
 };
 
+// iOS Safari (principalmente PWA instalado na tela de início) tem um bug conhecido: um <main>
+// com overflow-y:auto que estava dentro de display:none quando a tela trocou não fica
+// arrastável por toque até sofrer um reflow forçado — no mouse/desktop rola normalmente, o que
+// mascara o problema em teste local. Forçar esse reflow logo depois de exibir a tela evita telas
+// "travadas" que não rolam no celular.
+function reativarScrollTela(nome) {
+  requestAnimationFrame(() => {
+    const main = document.querySelector(`#tela-${nome} main`);
+    if (!main) return;
+    main.style.overflow = "hidden";
+    void main.offsetHeight;
+    main.style.overflow = "";
+  });
+}
 function irParaTela(nome) {
   TODAS_AS_TELAS.forEach((t) => $(`#tela-${t}`).classList.toggle("hidden", t !== nome));
   document.querySelectorAll(".menu-item").forEach((item) => item.classList.toggle("ativa", item.dataset.tela === nome));
@@ -3242,11 +3521,13 @@ function irParaTela(nome) {
     aplicarFiltroMesAtualListas();
     renderCarrosselListas();
   }
+  reativarScrollTela(nome);
 }
 function mostrarTelaCheia(nome, titulo) {
   TODAS_AS_TELAS.forEach((t) => $(`#tela-${t}`).classList.toggle("hidden", t !== nome));
   $("#topbar-titulo").textContent = titulo;
   $("#btn-menu").classList.add("modo-voltar");
+  reativarScrollTela(nome);
 }
 function abrirMenu() {
   $("#menu-lateral").classList.add("aberto");
@@ -3455,12 +3736,16 @@ function ligarEventos() {
   ligarBuscaCadastro("formas", "#fab-busca-formas", "#busca-formas-wrap", "#busca-formas", renderCadastroFormas);
   ligarBuscaCadastro("unidades", "#fab-busca-unidades", "#busca-unidades-wrap", "#busca-unidades", renderCadastroUnidades);
 
-  $("#card-lista-proxima").onclick = () => {
+  // "Itens pendentes" mostra a contagem da mesma lista selecionada no carrossel de cima — clicar
+  // em qualquer um dos dois cards abre essa lista.
+  const abrirListaProximaSelecionada = () => {
     const id = $("#mini-carrossel-proxima").dataset.idSelecionado;
     const lista = id && listasAtuais.find((l) => l.id === id);
     if (lista) abrirListaDetalhe(lista);
     else irParaTela("listas");
   };
+  $("#card-lista-proxima").onclick = abrirListaProximaSelecionada;
+  $("#card-itens-pendentes").onclick = abrirListaProximaSelecionada;
 
   $("#btn-salvar-lista").onclick = salvarLista;
   $("#btn-reabrir-lista-editar").onclick = async () => {
@@ -3554,6 +3839,9 @@ function ligarEventos() {
   $("#fi-unidade").addEventListener("input", (e) => renderSugestoesUnidade(e.target.value));
   $("#fi-unidade").addEventListener("focus", (e) => renderSugestoesUnidade(e.target.value));
   $("#fi-unidade").addEventListener("blur", () => setTimeout(() => $("#fi-unidade-sugestoes").classList.add("hidden"), 150));
+  $("#fi-local-nome").addEventListener("input", (e) => { $("#fi-local-id").value = ""; renderSugestoesLocalItem(e.target.value); });
+  $("#fi-local-nome").addEventListener("focus", (e) => renderSugestoesLocalItem(e.target.value));
+  $("#fi-local-nome").addEventListener("blur", () => setTimeout(() => $("#fi-local-sugestoes").classList.add("hidden"), 150));
   $("#btn-excluir-item").onclick = excluirItemAtual;
   $("#btn-cancelar-item").onclick = voltarParaTelaAnterior;
 
@@ -3630,6 +3918,8 @@ function ligarEventos() {
     };
   });
   renderOpcoesValorProvisionado();
+  renderOpcoesPeriodoDashboard();
+  $("#btn-toggle-nomes-dashboard").onclick = alternarPrivacidadeDashboard;
 
   $("#btn-onboarding-proximo").onclick = () => {
     if (onboardingPassoAtual === ONBOARDING_PASSOS.length - 1) concluirOnboarding();

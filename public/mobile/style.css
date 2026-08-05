@@ -854,6 +854,33 @@ textarea {
   font-weight: 600;
   text-align: right;
   max-width: 60%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.detalhe-linha .valor-detalhe strong {
+  font-family: "Sora";
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+}
+.detalhe-bloco-valor {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-radius: 12px;
+  padding: 0 10px;
+  margin: 4px 0;
+}
+.detalhe-linha-valor {
+  border-bottom: none;
+  padding: 12px 0;
+}
+.detalhe-valor-aviso {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.85;
+  text-align: left;
+  padding: 7px 0 10px;
+  border-top: 1px dashed var(--line);
 }
 .detalhe-titulo-credor {
   display: flex;
@@ -936,14 +963,15 @@ textarea {
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
 .mc-item-info {
-  margin-bottom: 14px;
-  padding-bottom: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
   border-bottom: 1px dashed var(--line);
 }
 .mc-item-info .nome {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text);
+  margin-bottom: 4px;
 }
 .mc-item-info .detalhe {
   font-size: 12px;
@@ -951,13 +979,16 @@ textarea {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-top: 2px;
 }
 .mc-valor-referencia {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
   font-size: 11px;
   font-style: italic;
   color: var(--muted);
-  margin-top: 6px;
 }
 .mc-valor-diferenca {
   display: flex;
@@ -1321,6 +1352,39 @@ main::-webkit-scrollbar {
   text-align: center;
   padding: 4px 0 2px;
 }
+/* Nomes ocultos nos dashboards (Grupos/Itens/Locais mais utilizados): só borra o texto do nome —
+   número, percentual, cor da barra/bolinha continuam normais. Controlado por uma classe no
+   <main> (ver alternarPrivacidadeDashboard) pra valer em qualquer render novo das listas sem
+   precisar mexer no JS que desenha cada uma. */
+#tela-inicio main.oculta-nomes-dashboard .item-aplicacao .nome {
+  filter: blur(5px);
+  user-select: none;
+}
+.dash-privacidade-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+  margin-top: -4px;
+  margin-bottom: -8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.btn-toggle-nomes-dashboard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.btn-toggle-nomes-dashboard:active {
+  background: var(--bg-soft);
+}
+.btn-toggle-nomes-dashboard[aria-pressed="true"] {
+  color: var(--primary);
+}
 
 /* ---------- carrossel de listas ---------- */
 .carrossel-listas {
@@ -1639,22 +1703,58 @@ main::-webkit-scrollbar {
 .linha-convite input {
   flex: 1;
 }
+.avatar-membro {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), #1e40af);
+  display: grid;
+  place-items: center;
+  font-family: "Sora";
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  flex-shrink: 0;
+}
 .linha-membro,
 .linha-convite-pendente {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 11px 2px;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
+.linha-membro:last-child,
+.linha-convite-pendente:last-child {
+  border-bottom: none;
+}
+.linha-membro .info,
+.linha-convite-pendente .info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 .linha-membro .nome,
 .linha-convite-pendente .nome {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linha-membro .email {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .linha-convite-pendente .acoes {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 .linha-convite-pendente button {
   padding: 6px 12px;
@@ -1757,41 +1857,83 @@ main::-webkit-scrollbar {
 }
 
 /* ---------- tabela de histórico de preços ---------- */
+/* Card (fundo, borda, sombra) igual ao resto do app — antes era uma lista solta sem nenhuma
+   moldura, meio perdida logo abaixo dos cards de Menor/Maior/Média. */
 .tabela-historico {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin-top: 4px;
+  padding: 2px 14px;
+  background: var(--superficie-glass), var(--card);
+  border: 1px solid var(--borda-glass);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 20px var(--card-shadow);
 }
+/* Grid (não flex) pra colunas do cabeçalho e das linhas caírem exatamente uma embaixo da outra —
+   com flex cada linha só se ajusta ao próprio conteúdo, então "Data" (curto) e "03/08/2026"
+   (longo) nunca ficavam alinhados entre si. */
 .linha-historico {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 82px 76px 22px;
   align-items: center;
-  justify-content: space-between;
-  padding: 11px 2px;
+  gap: 6px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
+.linha-historico:last-child {
+  border-bottom: none;
+}
 .linha-historico .local {
   font-weight: 600;
-  flex: 1;
+  text-align: left;
+}
+.linha-historico-cabecalho {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0 8px;
+}
+.linha-historico-cabecalho span {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.badge-mini {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  vertical-align: middle;
 }
 .linha-historico .valor {
   font-family: "Sora";
   font-weight: 700;
-  margin: 0 10px;
+  text-align: right;
 }
 .linha-historico .data {
   color: var(--muted);
   font-size: 12px;
+  text-align: left;
 }
 .btn-excluir-historico {
-  margin-left: 10px;
-  font-size: 14px;
-  line-height: 1;
-  opacity: 0.55;
-  flex-shrink: 0;
+  display: flex;
+  color: var(--muted);
+  justify-self: center;
 }
-.btn-excluir-historico:active {
-  opacity: 1;
+.btn-excluir-historico.ativo {
+  color: var(--primary);
+}
+.btn-excluir-historico:disabled {
+  opacity: 0.5;
+}
+.btn-excluir-historico.ativo:active {
+  opacity: 0.7;
   transform: scale(0.92);
 }
 
