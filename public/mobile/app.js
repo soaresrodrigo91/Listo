@@ -268,6 +268,8 @@ const ICONE_LOCAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 // as mesmas cores do sistema), enquanto o SVG com stroke="currentColor" acompanha o azul do fab.
 const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
 const ICONE_FECHAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
+// Duas setas em círculo (trocar/substituir) — usado no botão discreto de trocar item da lista.
+const ICONE_TROCAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
 /* ---------- estado ---------- */
 let auth = null, bd = null, usuario = null;
@@ -291,6 +293,14 @@ let listaAbertaId = null;
 let listaOrigemNovoItem = null;
 let itemCatalogoAbertoId = null;
 let itemListaPendenteId = null;
+// Item da lista sendo substituído no modal "Trocar item" (aberto pelo botão discreto embaixo do
+// checkbox de cada item pendente).
+let itemListaTrocaId = null;
+// Guarda de qual item da lista veio o atalho "+ Cadastrar" dentro do modal de troca (busca sem
+// resultado) — só setado por esse fluxo específico, pra saber depois de salvar o cadastro se deve
+// oferecer pra trocar o item recém-criado no lugar da linha original (equivalente a
+// listaOrigemNovoItem, mas para o fluxo de troca em vez do fluxo de adicionar).
+let itemListaTrocaPendenteAoCadastrar = null;
 // Último valor considerado (cadastro/último comprado/mais barato) pro item aberto no modal de
 // comprar — usado só pra comparar ao vivo com o que a pessoa digita em "Valor pago".
 let valorReferenciaModalComprar = 0;
@@ -1746,7 +1756,10 @@ function renderListaDetalhe() {
           : "";
         return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
-        <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
+        <div class="chk-col">
+          <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
+          <button class="btn-trocar-item" data-acao="trocar" title="Trocar item" aria-label="Trocar item" ${i.comprado || lista.finalizadaEm ? "disabled" : ""}>${ICONE_TROCAR}</button>
+        </div>
         <div class="info">
           <div class="nome">${esc(i.nome)}</div>
           ${detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : ""}
@@ -1768,6 +1781,12 @@ function renderListaDetalhe() {
         const item = itensListaAtuais.find((i) => i.id === btn.closest(".item").dataset.id);
         if (item.comprado) desmarcarComprado(item);
         else abrirModalComprar(item.id);
+      };
+    });
+    container.querySelectorAll('[data-acao="trocar"]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        abrirModalTrocarItem(btn.closest(".item").dataset.id);
       };
     });
     container.querySelectorAll('[data-acao="excluir"]').forEach((btn) => {
@@ -1797,10 +1816,7 @@ function renderListaDetalhe() {
     });
   }
 
-  $("#btn-finalizar-compra").classList.toggle("hidden", !(lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm));
-  // Só deixa clicar em "Finalizar compra" com pelo menos 1 item já marcado — finalizar uma lista
-  // sem nada comprado não faz sentido (viraria uma compra "vazia" no histórico).
-  $("#btn-finalizar-compra").disabled = !(lista.qtdComprados > 0);
+  atualizarBtnFinalizarCompra();
   $("#btn-reabrir-lista").classList.toggle("hidden", !lista.finalizadaEm);
 }
 async function reabrirLista() {
@@ -1919,6 +1935,19 @@ async function notificarMembrosEspaco(mensagem) {
   await batch.commit();
 }
 
+// "Finalizar compra" fica ao lado de "+ Adicionar item" em vez de sozinho no fim da lista de
+// itens (onde ficava inacessível sem rolar até o fim, numa lista comprida) — some enquanto o
+// formulário de adicionar item está aberto, além das condições normais de exibição.
+function atualizarBtnFinalizarCompra() {
+  const lista = listaAbertaAtual();
+  const formAberto = !$("#form-adicionar-item").classList.contains("hidden");
+  const visivel = !!lista && lista.qtdItens > 0 && !lista.permanente && !lista.finalizadaEm && !formAberto;
+  $("#btn-finalizar-compra").classList.toggle("hidden", !visivel);
+  $("#linha-acoes-lista").classList.toggle("unico", !visivel);
+  // Só deixa clicar em "Finalizar compra" com pelo menos 1 item já marcado — finalizar uma lista
+  // sem nada comprado não faz sentido (viraria uma compra "vazia" no histórico).
+  if (lista) $("#btn-finalizar-compra").disabled = !(lista.qtdComprados > 0);
+}
 function fecharFormAdicionarItem() {
   $("#ld-item-nome").value = "";
   $("#ld-item-id").value = "";
@@ -1930,6 +1959,7 @@ function fecharFormAdicionarItem() {
   $("#ld-item-sugestoes").classList.add("hidden");
   $("#form-adicionar-item").classList.add("hidden");
   $("#btn-abrir-form-add-item").classList.remove("hidden");
+  atualizarBtnFinalizarCompra();
 }
 
 async function adicionarItemNaLista() {
@@ -2036,6 +2066,94 @@ async function confirmarQuantidade() {
   await recalcularTotaisLista();
   fecharModalQuantidade();
   exibirSucesso("Quantidade atualizada!");
+}
+
+/* ---------- trocar item de uma lista (substitui por outro do catálogo, mantendo a linha) ---------- */
+function abrirModalTrocarItem(itemListaId) {
+  const item = itensListaAtuais.find((i) => i.id === itemListaId);
+  if (!item || item.comprado) return;
+  itemListaTrocaId = itemListaId;
+  $("#ti-item-nome").value = "";
+  $("#ti-item-id").value = "";
+  $("#ti-item-sugestoes").classList.add("hidden");
+  $("#ti-item-sugestoes").innerHTML = "";
+  mostrarMsg("#msg-trocar-item", "", "");
+  $("#overlay-trocar-item").classList.remove("hidden");
+  $("#ti-item-nome").focus();
+}
+function fecharModalTrocarItem() {
+  $("#overlay-trocar-item").classList.add("hidden");
+  itemListaTrocaId = null;
+}
+// Mesmo padrão de busca de renderSugestoesItemLista (inclusive o atalho "+ Cadastrar" quando não
+// acha nada no catálogo), mas substituindo a linha na hora do clique numa sugestão, em vez de só
+// preencher campos pra um "Adicionar" separado depois.
+async function renderSugestoesTrocarItem(query) {
+  const container = $("#ti-item-sugestoes");
+  const termo = normalizarTexto(query);
+  const encontrados = termo.length < 1 ? [] : itensAtuais.filter((i) => itemCombinaComBusca(i, termo)).slice(0, 6);
+  if (termo.length === 0) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  // Digitou algo e não achou nada no catálogo: mesmo atalho de cadastro rápido usado ao adicionar
+  // item na lista — ao salvar, pergunta se quer trocar a linha original por esse item novo.
+  if (encontrados.length === 0) {
+    container.innerHTML = `<div class="autocomplete-item autocomplete-novo-item" id="ti-cadastrar-novo-item"><span class="nome">Item não encontrado</span><span class="valor">+ Cadastrar "${esc(query.trim())}"</span></div>`;
+    container.classList.remove("hidden");
+    $("#ti-cadastrar-novo-item").onclick = () => {
+      const trocaId = itemListaTrocaId;
+      fecharModalTrocarItem();
+      abrirFormNovoItem();
+      $("#fi-nome").value = query.trim();
+      telaAnterior = "lista-detalhe";
+      itemListaTrocaPendenteAoCadastrar = trocaId;
+    };
+    return;
+  }
+  container.innerHTML = encontrados
+    .map((i) => {
+      const detalhe = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean).join(" · ");
+      return `<div class="autocomplete-item" data-id="${i.id}"><span class="nome">${esc(i.nome)}</span><span class="grupo">${esc(detalhe)}</span></div>`;
+    })
+    .join("");
+  container.classList.remove("hidden");
+  container.querySelectorAll(".autocomplete-item").forEach((el) => {
+    el.onclick = () => {
+      const item = itensAtuais.find((i) => i.id === el.dataset.id);
+      if (item) confirmarTrocaItem(item);
+    };
+  });
+}
+async function confirmarTrocaItem(itemCatalogo) {
+  const itemLista = itensListaAtuais.find((i) => i.id === itemListaTrocaId);
+  if (!itemLista) return;
+  if (itemCatalogo.id === itemLista.itemId) {
+    fecharModalTrocarItem();
+    return;
+  }
+  // Não deixa trocar pra um item que já está em outra linha dessa mesma lista — geraria duplicata.
+  if (itensListaAtuais.some((i) => i.id !== itemLista.id && i.itemId === itemCatalogo.id)) {
+    mostrarMsg("#msg-trocar-item", `"${itemCatalogo.nome}" já está nesta lista.`, "erro");
+    return;
+  }
+  let quantidade = itemLista.quantidade || 1;
+  if (!unidadeAceitaFracao(itemCatalogo.unidade)) quantidade = Math.round(quantidade) || 1;
+  try {
+    const valorProvisionado = await valorProvisionadoParaItem(itemCatalogo);
+    await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", itemLista.id), {
+      itemId: itemCatalogo.id, nome: itemCatalogo.nome, marca: itemCatalogo.marca || null,
+      descricao: itemCatalogo.descricao || null, descricaoUnidade: itemCatalogo.descricaoUnidade || null,
+      unidade: itemCatalogo.unidade, grupoNome: itemCatalogo.grupoNome || null,
+      quantidade, valorProvisionado, subtotal: quantidade * valorProvisionado, subtotalProvisionado: quantidade * valorProvisionado,
+    });
+    await recalcularTotaisLista();
+    fecharModalTrocarItem();
+    exibirSucesso(`Item trocado para "${itemCatalogo.nome}"!`);
+  } catch {
+    mostrarMsg("#msg-trocar-item", "Não foi possível trocar o item. Confira a conexão e tente de novo.", "erro");
+  }
 }
 
 /* ---------- marcar item como comprado (modal local + valor) ---------- */
@@ -2668,10 +2786,11 @@ async function renderHistoricoItem(item) {
 
 function abrirFormNovoItem() {
   telaAnterior = "cadastro-itens";
-  // Só o atalho "+ Cadastrar" dentro de uma lista seta isso de novo, logo depois desta chamada —
-  // limpa aqui pra um "Novo item" vindo de Cadastros > Itens nunca herdar uma lista de uma visita
-  // anterior a este formulário.
+  // Só o atalho "+ Cadastrar" dentro de uma lista (ou do modal de troca) seta isso de novo, logo
+  // depois desta chamada — limpa aqui pra um "Novo item" vindo de Cadastros > Itens nunca herdar
+  // uma lista/troca de uma visita anterior a este formulário.
   listaOrigemNovoItem = null;
+  itemListaTrocaPendenteAoCadastrar = null;
   $("#fi-id").value = "";
   $("#fi-nome").value = "";
   $("#fi-descricao").value = "";
@@ -2910,6 +3029,24 @@ async function salvarItem() {
           });
           recalcularTotaisLista(listaId);
           notificarMembrosEspaco(`${adicionadoPorNome} adicionou "${dados.nome}" à lista "${listaAlvo.nome}".`);
+        }
+      }
+      // Cadastro veio do atalho "+ Cadastrar" de dentro do modal de troca — pergunta se quer
+      // trocar a linha original pelo item recém-criado (mesma ideia do fluxo de adicionar acima,
+      // mas substituindo a linha em vez de criar uma nova).
+      if (itemListaTrocaPendenteAoCadastrar) {
+        const itemListaId = itemListaTrocaPendenteAoCadastrar;
+        itemListaTrocaPendenteAoCadastrar = null;
+        const itemLista = itensListaAtuais.find((i) => i.id === itemListaId);
+        if (itemLista && confirm(`Trocar "${itemLista.nome}" por "${nome}"?`)) {
+          let quantidade = itemLista.quantidade || 1;
+          if (!unidadeAceitaFracao(dados.unidade)) quantidade = Math.round(quantidade) || 1;
+          await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", itemListaId), {
+            itemId: refItem.id, nome: dados.nome, marca: dados.marca, descricao: dados.descricao,
+            descricaoUnidade: dados.descricaoUnidade, unidade: dados.unidade, grupoNome: dados.grupoNome,
+            quantidade, valorProvisionado: dados.valor, subtotal: quantidade * dados.valor, subtotalProvisionado: quantidade * dados.valor,
+          });
+          recalcularTotaisLista();
         }
       }
     }
@@ -3770,6 +3907,7 @@ function ligarEventos() {
     $("#btn-abrir-form-add-item").classList.add("hidden");
     $("#form-adicionar-item").classList.remove("hidden");
     $("#ld-item-nome").focus();
+    atualizarBtnFinalizarCompra();
   };
   // Clicar fora do formulário de adicionar item (com ele aberto) equivale a desistir: recolhe de volta pra linha.
   // Usa composedPath() (caminho capturado no momento do clique) em vez de e.target: escolher uma
@@ -3805,6 +3943,11 @@ function ligarEventos() {
   $("#btn-confirmar-quantidade").onclick = confirmarQuantidade;
   $("#btn-cancelar-quantidade").onclick = fecharModalQuantidade;
   $("#overlay-quantidade").addEventListener("click", (e) => { if (e.target.id === "overlay-quantidade") fecharModalQuantidade(); });
+
+  $("#ti-item-nome").addEventListener("input", (e) => renderSugestoesTrocarItem(e.target.value));
+  $("#ti-item-nome").addEventListener("blur", () => setTimeout(() => $("#ti-item-sugestoes").classList.add("hidden"), 150));
+  $("#btn-cancelar-trocar-item").onclick = fecharModalTrocarItem;
+  $("#overlay-trocar-item").addEventListener("click", (e) => { if (e.target.id === "overlay-trocar-item") fecharModalTrocarItem(); });
 
   $("#btn-confirmar-finalizar").onclick = confirmarFinalizar;
   $("#btn-cancelar-finalizar").onclick = fecharModalFinalizar;

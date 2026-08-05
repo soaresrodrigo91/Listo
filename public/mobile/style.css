@@ -1656,6 +1656,30 @@ main::-webkit-scrollbar {
   border-color: var(--green);
   color: #06210f;
 }
+.chk-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.btn-trocar-item {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.btn-trocar-item:active {
+  background: var(--bg);
+}
+.btn-trocar-item:disabled {
+  opacity: 0.35;
+}
 .btn-excluir-linha {
   flex-shrink: 0;
   width: 26px;
@@ -2044,6 +2068,24 @@ main::-webkit-scrollbar {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+/* "+ Adicionar item" e "Finalizar compra" lado a lado, no topo da lista — antes "Finalizar
+   compra" ficava sozinho no fim da lista de itens, inacessível sem rolar até o fim numa lista
+   comprida. Some enquanto o formulário de adicionar item está aberto (ver JS). */
+.linha-acoes-lista {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.linha-acoes-lista > .btn,
+.linha-acoes-lista > .btn-secundario {
+  width: 100%;
+  margin-top: 0;
+}
+/* "Finalizar compra" escondido (lista permanente, sem itens, ou form de adicionar item aberto):
+   "+ Adicionar item" ocupa a linha inteira em vez de deixar a segunda coluna vazia. */
+.linha-acoes-lista.unico {
+  grid-template-columns: 1fr;
 }
 .linha-dupla > .field {
   min-width: 0;
