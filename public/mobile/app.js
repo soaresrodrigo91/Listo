@@ -1228,7 +1228,9 @@ function renderCarrosselListas() {
     corrigirLimitesScrollIOS(container.closest("main"));
     return;
   }
-  const ordenadas = [...doMes].sort((a, b) => (a.criadoEm?.toMillis?.() || 0) - (b.criadoEm?.toMillis?.() || 0));
+  // Mais nova (a que provavelmente ainda está em aberto) primeiro, mais antiga por último — evita
+  // ter que rolar até o fim pra achar a lista que se está usando agora.
+  const ordenadas = [...doMes].sort((a, b) => (b.criadoEm?.toMillis?.() || 0) - (a.criadoEm?.toMillis?.() || 0));
   container.innerHTML = ordenadas
     .map((l) => {
       const status = l.status || "pendente";
@@ -1723,8 +1725,10 @@ function renderListaDetalhe() {
     <div class="detalhe-titulo-credor">
       <span class="detalhe-nome-lista">${esc(lista.nome)}</span>
       <span class="badge-status ${classeVisualStatus}">${lista.permanente ? "Permanente" : rotuloStatus}</span>
-      ${lista.finalizadaEm ? `<button type="button" class="link-detalhes-lista" id="btn-abrir-detalhes-lista">Detalhes</button>` : ""}
-      <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+      <div class="detalhe-titulo-acoes">
+        ${lista.finalizadaEm ? `<button type="button" class="link-detalhes-lista" id="btn-abrir-detalhes-lista">Detalhes</button>` : ""}
+        <button type="button" class="btn-editar-lista-mini" id="btn-abrir-editar-lista" aria-label="Editar lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+      </div>
     </div>
     <div class="card-lista-rodape" style="margin-bottom:6px">
       <span><span class="icone-comprado">✓</span> ${qtdComprados} comprado${qtdComprados === 1 ? "" : "s"} · <span class="icone-pendente">×</span> ${qtdPendentes} pendente${qtdPendentes === 1 ? "" : "s"}</span>

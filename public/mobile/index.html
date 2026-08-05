@@ -106,7 +106,7 @@
     </nav>
     <div class="menu-rodape">
       <button id="btn-sair" class="menu-sair"><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>Sair</button>
-      <div class="menu-versao" id="app-versao">01.83</div>
+      <div class="menu-versao" id="app-versao">01.84</div>
     </div>
   </aside>
 
@@ -248,8 +248,8 @@
           </div>
           <div class="field"><label>Valor</label><input id="ld-valor-provisionado" type="text" disabled placeholder="R$ 0,00"></div>
           <div class="linha-dupla">
-            <button class="btn" id="btn-adicionar-item-lista">+ Adicionar item</button>
             <button class="btn-secundario" id="btn-cancelar-add-item-lista">Cancelar</button>
+            <button class="btn" id="btn-adicionar-item-lista">+ Adicionar item</button>
           </div>
         </div>
       </div>
@@ -479,9 +479,9 @@
       <div class="field"><label>Nome da lista *</label><input id="fn-nome" type="text" placeholder="Ex.: Compras do mês"></div>
       <div class="field"><label>Observações</label><input id="fn-observacoes" type="text" placeholder="Opcional"></div>
       <div id="msg-form-lista"></div>
-      <div class="linha-dupla">
-        <button class="btn-secundario" id="btn-cancelar-lista">Cancelar</button>
-        <button class="btn" id="btn-salvar-lista">Salvar</button>
+      <div class="zona-principal-lista">
+        <button type="button" id="btn-cancelar-lista">Cancelar</button>
+        <button type="button" id="btn-salvar-lista">Salvar</button>
       </div>
       <div class="zona-acoes-lista hidden" id="zona-acoes-lista">
         <button class="linha-acao-lista hidden" id="btn-reabrir-lista-editar">Reabrir lista</button>

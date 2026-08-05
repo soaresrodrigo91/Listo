@@ -298,10 +298,38 @@ textarea {
 /* Padrão de cor dos botões nas telas de cadastro (Itens, Grupos, Locais, Formas, Unidades):
    Salvar sempre azul (.btn, ação principal), Excluir sempre vermelho em caixa (.btn-cancelar,
    ação destrutiva), Cancelar sempre neutro (.btn-secundario puro). A tela de Editar lista foge
-   desse padrão de propósito — ver .zona-acoes-lista, um grupo só com as ações secundárias. */
+   desse padrão de propósito — ver .zona-principal-lista/.zona-acoes-lista, mais compactas. */
 .linha-dupla > .btn,
 .linha-dupla > .btn-secundario {
   margin-top: 0;
+}
+/* Cancelar/Salvar como duas células de uma caixa só (em vez do .btn/.btn-secundario padrão, alto
+   e com sombra) — mesma escala visual compacta da caixa de ações logo abaixo, pro conjunto da
+   tela não parecer duas linguagens de botão diferentes. Salvar se destaca só pela cor do texto. */
+.zona-principal-lista {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.zona-principal-lista button {
+  padding: 14px 0;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  color: var(--text);
+  background: var(--bg-soft);
+}
+.zona-principal-lista button:first-child {
+  border-right: 1px solid var(--line);
+}
+.zona-principal-lista button:active {
+  background: var(--bg);
+}
+#btn-salvar-lista {
+  color: var(--primary);
 }
 /* Ações secundárias da lista (Reabrir/Excluir) agrupadas numa caixa só, em vez de botões soltos
    um embaixo do outro — cada linha ocupa a largura toda, com divisor fino entre as que estiverem
@@ -921,16 +949,25 @@ textarea {
   font-weight: 500;
   color: var(--muted);
 }
+/* Agrupa "Detalhes" e o botão de editar — um único margin-left:auto no grupo empurra os dois
+   juntos pra ponta direita, em vez de cada um brigar pelo espaço sobrando por conta própria (o
+   que deixava "Detalhes" colado no badge de status e o editar lá longe, na ponta). */
+.detalhe-titulo-acoes {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
 /* Só o texto, sem caixa/pílula — ao lado do badge de status (que já é uma pílula colorida),
    outro elemento em formato de pílula pareceria uma segunda "flag" de status em vez de uma ação. */
 .link-detalhes-lista {
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--primary);
+  color: var(--text);
 }
 .btn-editar-lista-mini {
-  margin-left: auto;
   flex-shrink: 0;
   width: 28px;
   height: 28px;
