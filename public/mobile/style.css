@@ -298,69 +298,58 @@ textarea {
 /* Padrão de cor dos botões nas telas de cadastro (Itens, Grupos, Locais, Formas, Unidades):
    Salvar sempre azul (.btn, ação principal), Excluir sempre vermelho em caixa (.btn-cancelar,
    ação destrutiva), Cancelar sempre neutro (.btn-secundario puro). A tela de Editar lista foge
-   desse padrão de propósito — ver .zona-principal-lista/.zona-acoes-lista, mais compactas. */
+   desse padrão de propósito — ver .btn-lista-primario/.link-lista mais abaixo. */
 .linha-dupla > .btn,
 .linha-dupla > .btn-secundario {
   margin-top: 0;
 }
-/* Cancelar/Salvar como duas células de uma caixa só (em vez do .btn/.btn-secundario padrão, alto
-   e com sombra) — mesma escala visual compacta da caixa de ações logo abaixo, pro conjunto da
-   tela não parecer duas linguagens de botão diferentes. Fundo com leve sombra "flutuando" sobre a
-   página (mesma receita de .item/.card-lista) em vez do fundo liso var(--bg-soft) usado pelos
-   campos de texto — com a MESMA caixa lisa dos campos, o nome dentro dela ficava parecendo
-   informação de um campo em vez de botão; a sombra separa visualmente as duas linguagens. */
-.zona-principal-lista {
+/* Editar lista foge do padrão .btn/.btn-secundario boxed de propósito: nessa tela, os ÚNICOS
+   elementos com caixa (fundo + borda, tentando parecer uma superfície) são os campos de texto
+   acima — Nome/Observações. Botão vira ou preenchido de cor sólida (Salvar, a única ação "de
+   peso" aqui) ou texto puro sem caixa nenhuma (todo o resto) — sem meio-termo tipo "caixa clara
+   com borda", que é exatamente a cara de um campo. Assim não tem como confundir os dois. */
+.btn-lista-primario {
+  width: 100%;
   margin-top: 4px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  padding: 15px;
   border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 4px 14px var(--card-shadow-sm);
-}
-.zona-principal-lista button {
-  padding: 14px 0;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
   text-align: center;
-  color: var(--primary);
-  background: var(--superficie-glass), var(--card);
+  background: linear-gradient(135deg, var(--primary), #38bdf8);
+  color: var(--primary-ink);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
 }
-.zona-principal-lista button:first-child {
-  border-right: 1px solid var(--borda-glass);
+.btn-lista-primario:active {
+  transform: scale(0.98);
 }
-.zona-principal-lista button:active {
-  background: var(--bg-soft);
-}
-/* Ações secundárias da lista (Reabrir/Excluir) agrupadas numa caixa só, em vez de botões soltos
-   um embaixo do outro — cada linha ocupa a largura toda, com divisor fino entre as que estiverem
-   visíveis ao mesmo tempo (a combinação de seletores com :not(.hidden) evita um divisor "órfão"
-   quando só uma das duas está à mostra, ex.: lista pendente sem "Reabrir"). Azul por padrão (cor
-   "de botão", não de texto solto); vermelho só na ação destrutiva (.linha-acao-lista-perigo).
-   Mesma sombra "flutuando" da caixa acima, pelo mesmo motivo: diferenciar de campo de texto. */
-.zona-acoes-lista {
-  margin-top: 22px;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 4px 14px var(--card-shadow-sm);
-}
-.linha-acao-lista {
+/* Sem fundo, sem borda — só texto colorido (azul = ação normal, vermelho = destrutiva via
+   .link-lista-perigo). Dentro de .zona-acoes-lista, dois ".link-lista" seguidos ganham um filete
+   fino entre si (não uma caixa ao redor dos dois, só uma linha) pra ler como um agrupamento sem
+   virar mais uma superfície com borda. */
+.link-lista {
   display: block;
   width: 100%;
-  padding: 14px 16px;
+  margin-top: 4px;
+  padding: 13px 0;
+  text-align: center;
   font-weight: 600;
   font-size: 14px;
-  text-align: left;
   color: var(--primary);
-  background: var(--superficie-glass), var(--card);
+  background: none;
+  border: none;
 }
-.linha-acao-lista:not(.hidden) + .linha-acao-lista:not(.hidden) {
-  border-top: 1px solid var(--borda-glass);
+.link-lista:active {
+  opacity: 0.6;
 }
-.linha-acao-lista:active {
-  background: var(--bg-soft);
-}
-.linha-acao-lista-perigo {
+.link-lista-perigo {
   color: var(--danger);
+}
+.zona-acoes-lista {
+  margin-top: 18px;
+}
+.link-lista:not(.hidden) + .link-lista:not(.hidden) {
+  border-top: 1px solid var(--line);
 }
 .aviso {
   margin-top: 14px;
