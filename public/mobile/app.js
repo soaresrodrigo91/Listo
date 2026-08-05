@@ -1780,32 +1780,36 @@ function renderListaDetalhe() {
         // uma palavra a qualquer momento, inclusive separando nome e sobrenome de quem lançou.
         const partes = [i.marca ?? catalogo?.marca, i.descricao ?? catalogo?.descricao, i.descricaoUnidade ?? catalogo?.descricaoUnidade].filter(Boolean);
         const detalhe = partes.map((p) => esc(p)).join(" · ");
-        // Local e nome de quem lançou agora em linhas próprias (não mais juntos com " · ") — só
-        // existe depois que o item é marcado como comprado (é aí que o local da compra é
-        // escolhido, ver abrirModalComprar).
+        // Local e nome de quem lançou — só existe depois que o item é marcado como comprado (é aí
+        // que o local da compra é escolhido, ver abrirModalComprar). Vão juntos numa linha só no
+        // rodapé do card, com "trocar"/"excluir" — mantém o topo do card (nome, valor, qtd) livre
+        // dessas informações secundárias.
         const nomeLocalCompra = i.localCompraId ? locaisAtuais.find((l) => l.id === i.localCompraId)?.nome : null;
-        const localCompra = nomeLocalCompra ? `<div class="local-compra-item">${ICONE_LOCAL}${esc(nomeLocalCompra)}</div>` : "";
-        const adicionadoPor = espacoCompartilhado && i.adicionadoPorNome
-          ? `<div class="adicionado-por">${ICONE_PESSOA}${esc(i.adicionadoPorNome)}</div>`
-          : "";
+        const metaPartes = [
+          espacoCompartilhado && i.adicionadoPorNome ? `${ICONE_PESSOA}${esc(i.adicionadoPorNome)}` : null,
+          nomeLocalCompra ? `${ICONE_LOCAL}${esc(nomeLocalCompra)}` : null,
+        ].filter(Boolean);
         return `
       <div class="item ${i.comprado ? "comprado" : ""}" data-id="${i.id}">
-        <div class="chk-col">
-          <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
-          <button class="btn-trocar-item" data-acao="trocar" title="Trocar item" aria-label="Trocar item" ${i.comprado || lista.finalizadaEm ? "disabled" : ""}>${ICONE_TROCAR}</button>
-        </div>
+        <button class="chk" data-acao="marcar" ${lista.finalizadaEm ? "disabled" : ""}>✓</button>
         <div class="info">
-          <div class="nome">${esc(i.nome)}</div>
-          ${detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : ""}
-          ${localCompra}
-          ${adicionadoPor}
+          <div class="item-linha-principal">
+            <span class="nome">${esc(i.nome)}</span>
+            <span class="valor">${formatarMoeda(i.subtotal)}${setaTendenciaHtml(tendenciaValorPago(i), true)}</span>
+          </div>
+          <div class="item-linha-secundaria">
+            ${detalhe ? `<span class="detalhe detalhe-truncado">${detalhe}</span>` : `<span class="detalhe detalhe-truncado"></span>`}
+            <button class="btn-qtd" data-acao="qtd" ${lista.finalizadaEm ? "disabled" : ""}>${esc(formatarQuantidadeLista(i))}</button>
+            <span class="valor-unitario">${formatarMoeda(valorUnitarioExibido(i))}/${esc(abreviarUnidade(i.unidade))}</span>
+          </div>
         </div>
-        <button class="btn-qtd" data-acao="qtd" ${lista.finalizadaEm ? "disabled" : ""}>${esc(formatarQuantidadeLista(i))}</button>
-        <div class="valor-linha">
-          <span class="valor-unitario">${formatarMoeda(valorUnitarioExibido(i))}/${esc(abreviarUnidade(i.unidade))}</span>
-          <span class="valor">${formatarMoeda(i.subtotal)}${setaTendenciaHtml(tendenciaValorPago(i), true)}</span>
+        <div class="item-rodape">
+          <span class="item-rodape-meta">${metaPartes.join(" · ")}</span>
+          <div class="item-rodape-acoes">
+            <button class="btn-trocar-item" data-acao="trocar" title="Trocar item" aria-label="Trocar item" ${i.comprado || lista.finalizadaEm ? "disabled" : ""}>${ICONE_TROCAR}</button>
+            ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
+          </div>
         </div>
-        ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
       </div>`;
       })
       .join("");
