@@ -1627,6 +1627,22 @@ main::-webkit-scrollbar {
 .item .info {
   min-width: 0;
 }
+/* Telas de Cadastro (Grupos, Locais, Formas de Pagamento, Unidades) reaproveitam o card ".item",
+   mas não têm o botão "chk" que ocupa a coluna de 28px na lista de compras — sem essa regra, o
+   grid de 2 colunas posiciona ".info" sozinho nessa coluna estreita e corta o nome. */
+.item.item-cadastro {
+  grid-template-columns: 1fr;
+}
+/* Catálogo de Itens (Cadastro > Itens): também sem checkbox, mas com valor + botão de enviar do
+   lado do nome — precisa de 3 colunas próprias (nome flexível, valor e botão do tamanho do
+   conteúdo) em vez do "28px 1fr" pensado pro checkbox da lista de compras. */
+.item.item-catalogo {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+.item.item-catalogo .valor {
+  flex-shrink: 0;
+}
 /* Nome + valor total na mesma linha (hierarquia principal do item); quantidade, detalhe e valor
    unitário formam uma segunda linha só deles logo abaixo — antes tudo isso brigava lado a lado
    numa única linha, obrigando cada pedaço a ficar minúsculo pra caber. */

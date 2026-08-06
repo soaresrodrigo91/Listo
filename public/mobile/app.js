@@ -73,10 +73,13 @@ function unidadeAceitaFracao(nomeUnidade) {
 }
 // Quantidade do item na lista de compras, formatada de forma compacta pro chip clicável do meio
 // da linha: unidade não fracionável mostra só o número (ex.: 1, 12, 13); fracionável mostra o
-// número com vírgula colado na unidade, sem espaço (ex.: 200g, 3,5kg).
+// número com vírgula colado na unidade, sem espaço (ex.: 200g, 3,5kg). 3 casas (não 2) pra pesagem
+// em grama aparecer certa em quilos (ex.: 108g pesado = 0,108kg, não arredonda pra 0,11kg) — um
+// arredondamento só na exibição já bastava pra parecer que o valor por kg tinha sido calculado
+// errado (a conta usa a quantidade digitada de verdade, só o texto do chip que cortava as casas).
 function formatarQuantidadeLista(item) {
   if (!unidadeAceitaFracao(item.unidade)) return String(item.quantidade);
-  const numero = Number(item.quantidade || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  const numero = Number(item.quantidade || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
   return `${numero}${(item.unidade || "").toLowerCase()}`;
 }
 // Ajusta um campo de quantidade pra unidade atual: guarda a unidade no dataset (lido pelo
@@ -84,7 +87,9 @@ function formatarQuantidadeLista(item) {
 function configurarCampoQuantidade(input, nomeUnidade) {
   const fracionavel = unidadeAceitaFracao(nomeUnidade);
   input.dataset.unidade = nomeUnidade || "";
-  input.step = fracionavel ? "0.01" : "1";
+  // 0.001 (não 0.01): peso pesado em grama vira quilo com 3 casas (ex.: 0,108kg) — um step de 2
+  // casas só afeta os botões +/-, mas mantém a expectativa do campo alinhada com o resto da conta.
+  input.step = fracionavel ? "0.001" : "1";
   input.inputMode = fracionavel ? "decimal" : "numeric";
 }
 // Bloqueia "." e "," digitados (ou colados) quando a unidade atual do campo não é fracionável —
@@ -1516,6 +1521,12 @@ function abrirListaDetalhe(lista) {
   carregarLocalMaisUsado();
   telaAnterior = "listas";
   if (unsubItensLista) unsubItensLista();
+  // renderListaDetalhe só era chamado dentro do onSnapshot — antes do primeiro retorno chegar
+  // (a assinatura é assíncrona), a tela continuava mostrando nome/itens/valor da ÚLTIMA lista
+  // aberta, dando a impressão de ter aberto "a lista errada". Limpa e desenha o cabeçalho certo
+  // (com 0 itens por uma fração de segundo, até o listener trazer os de verdade) antes de assinar.
+  itensListaAtuais = [];
+  renderListaDetalhe();
   unsubItensLista = onSnapshot(collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"), (snap) => {
     itensListaAtuais = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderListaDetalhe();
@@ -2062,7 +2073,16 @@ async function recalcularTotaisLista(listaId = listaAbertaId) {
 }
 
 /* ---------- alterar quantidade de um item na lista ---------- */
-function abrirModalQuantidade(itemListaId) {
+// Valor por unidade do item cuja quantidade está sendo alterada — junto com a quantidade digitada,
+// dá o valor total mostrado ao vivo no modal (mesma ideia do "Valor" em Adicionar item, ver
+// atualizarValorAdicionarItem). Comprado usa o valor realmente pago; pendente busca o valor
+// provisionado atual do catálogo (não o congelado na linha, que pode estar desatualizado).
+let valorUnitarioAlterarQuantidade = 0;
+function atualizarValorAlterarQuantidade() {
+  const quantidade = Number($("#qtd-valor").value) || 0;
+  $("#qtd-valor-provisionado").value = formatarMoeda(valorUnitarioAlterarQuantidade * quantidade);
+}
+async function abrirModalQuantidade(itemListaId) {
   const item = itensListaAtuais.find((i) => i.id === itemListaId);
   if (!item) return;
   itemListaPendenteId = itemListaId;
@@ -2070,6 +2090,13 @@ function abrirModalQuantidade(itemListaId) {
   configurarCampoQuantidade($("#qtd-valor"), item.unidade);
   $("#qtd-label").textContent = `Quantidade${item.unidade ? ` (${item.unidade})` : ""} *`;
   mostrarMsg("#msg-quantidade", "", "");
+  if (item.comprado && item.valorPago > 0) {
+    valorUnitarioAlterarQuantidade = item.valorPago;
+  } else {
+    const itemCatalogo = itensAtuais.find((i) => i.id === item.itemId);
+    valorUnitarioAlterarQuantidade = itemCatalogo ? await valorProvisionadoParaItem(itemCatalogo) : (item.valorProvisionado || 0);
+  }
+  atualizarValorAlterarQuantidade();
   $("#overlay-quantidade").classList.remove("hidden");
 }
 function fecharModalQuantidade() {
@@ -2085,9 +2112,22 @@ async function confirmarQuantidade() {
     mostrarMsg("#msg-quantidade", "Informe uma quantidade válida.", "erro");
     return;
   }
-  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
-    quantidade, subtotal: quantidade * (item.valorProvisionado || 0), subtotalProvisionado: quantidade * (item.valorProvisionado || 0),
-  });
+  const dados = { quantidade };
+  if (item.comprado && item.valorPago > 0) {
+    // Já comprado: o preço unitário é o que foi realmente pago (não muda com a quantidade) — só o
+    // subtotal precisa recalcular. "valorProvisionado" fica intocado, é a referência original.
+    dados.subtotal = quantidade * item.valorPago;
+  } else {
+    // O "valorProvisionado" salvo na linha é uma foto de quando o item entrou na lista — se o
+    // preço foi editado no cadastro depois disso, essa foto fica desatualizada. Busca de novo o
+    // valor atual do catálogo em vez de reaproveitar o valor antigo guardado na linha.
+    const itemCatalogo = itensAtuais.find((i) => i.id === item.itemId);
+    const valorProvisionado = itemCatalogo ? await valorProvisionadoParaItem(itemCatalogo) : (item.valorProvisionado || 0);
+    dados.valorProvisionado = valorProvisionado;
+    dados.subtotal = quantidade * valorProvisionado;
+    dados.subtotalProvisionado = quantidade * valorProvisionado;
+  }
+  await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), dados);
   await recalcularTotaisLista();
   fecharModalQuantidade();
   exibirSucesso("Quantidade atualizada!");
@@ -2194,13 +2234,25 @@ async function carregarLocalMaisUsado() {
     localMaisUsadoId = null;
   }
 }
-// Compara o que está sendo digitado em "Valor pago" com o último valor considerado (mostrado
-// acima) e atualiza a setinha ao vivo: verde/para baixo se ficou mais barato, vermelha/pra cima
-// se ficou mais caro — some se não há referência ainda ou o valor bate exatamente.
+// Preço por unidade/kg realmente pago, a partir do que está preenchido no formulário agora — em
+// unidade fracionável (kg, g, ml, l), "Valor pago" guarda o TOTAL da compra (o que sai no
+// cupom/balança), então o preço por kg é esse total dividido pela quantidade pesada; em
+// unidade/caixa/dúzia, "Valor pago" já é o preço por unidade direto, sem conta nenhuma.
+function valorPorUnidadeModalComprar(item) {
+  const valorDigitado = paraNumero($("#mc-valor").value);
+  if (!unidadeAceitaFracao(item.unidade)) return valorDigitado;
+  const quantidade = Number($("#mc-quantidade").value) || 0;
+  return quantidade > 0 ? valorDigitado / quantidade : 0;
+}
+// Compara o preço por unidade/kg resultante do que está sendo digitado com o último valor
+// considerado (mostrado acima) e atualiza a setinha ao vivo: verde/para baixo se ficou mais
+// barato, vermelha/pra cima se ficou mais caro — some se não há referência ainda ou o valor bate
+// exatamente.
 function atualizarDiferencaValorComprar() {
   const el = $("#mc-valor-diferenca");
   if (!el) return;
-  const atual = paraNumero($("#mc-valor").value);
+  const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
+  const atual = item ? valorPorUnidadeModalComprar(item) : 0;
   const diferenca = valorReferenciaModalComprar > 0 && atual > 0
     ? Math.round((atual - valorReferenciaModalComprar) * 100) / 100
     : 0;
@@ -2213,9 +2265,12 @@ function atualizarDiferencaValorComprar() {
   el.className = `mc-valor-diferenca ${tendencia}`;
   el.innerHTML = `${setaTendenciaHtml(tendencia)} ${diferenca < 0 ? "−" : "+"}${formatarMoeda(Math.abs(diferenca))} em relação ao último valor`;
 }
-// "Valor pago" é sempre por unidade — com mais de 1 unidade nessa linha, deixa claro quanto isso
-// dá no total (provisionado ao abrir o modal, e ao vivo conforme o valor digitado muda), já que
-// o total só aparece de novo depois de confirmar a compra.
+// Fracionável (kg, g, ml, l): "Valor pago" é o TOTAL da compra (o que sai no cupom/balança) — a
+// prévia mostra o preço por kg/g resultante da conta (total ÷ quantidade pesada), que é o valor
+// que efetivamente fica registrado no item (ver confirmarCompra), não o total digitado.
+// Unidade/caixa/dúzia: "Valor pago" já é o preço por unidade direto — a prévia mostra o total da
+// linha (quantidade × valor), só quando há mais de 1 unidade (senão seria redundante com o
+// próprio "Valor pago").
 function atualizarLegendaValorTotalComprar() {
   const el = $("#mc-valor-total");
   if (!el) return;
@@ -2224,13 +2279,20 @@ function atualizarLegendaValorTotalComprar() {
     el.textContent = "";
     return;
   }
-  const fracionavel = unidadeAceitaFracao(item.unidade);
-  const quantidade = fracionavel ? Number($("#mc-quantidade").value) || 0 : item.quantidade || 0;
+  const quantidade = Number($("#mc-quantidade").value) || 0;
+  const valor = paraNumero($("#mc-valor").value);
+  if (unidadeAceitaFracao(item.unidade)) {
+    if (!(quantidade > 0) || !(valor > 0)) {
+      el.textContent = "";
+      return;
+    }
+    el.textContent = `Valor por ${abreviarUnidade(item.unidade)}: ${formatarMoeda(valor / quantidade)}`;
+    return;
+  }
   if (!(quantidade > 1)) {
     el.textContent = "";
     return;
   }
-  const valor = paraNumero($("#mc-valor").value);
   const numero = quantidade.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
   el.textContent = `Total para ${numero}${item.unidade ? ` ${abreviarUnidade(item.unidade)}` : ""}: ${formatarMoeda(quantidade * valor)}`;
 }
@@ -2249,20 +2311,29 @@ async function abrirModalComprar(itemListaId) {
     (detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : "") +
     `<div id="mc-valor-referencia" class="mc-valor-referencia">Buscando último valor...</div>`;
 
-  // Unidades fracionáveis (kg, g, ml, l) costumam ter o peso real definido só na balança do
-  // mercado — em vez de fazer a conta de cabeça, deixa informar a quantidade separadamente.
+  // Quantidade comprada sempre editável aqui, não só em unidades fracionáveis (kg, g, ml, l) — o
+  // peso real costuma sair diferente do estimado na balança do mercado, mas o mesmo vale pra
+  // unidade/caixa/dúzia (comprou mais ou menos que o planejado). Fracionável aceita decimais (peso
+  // real), não fracionável continua só números inteiros — ver configurarCampoQuantidade. Subtotal
+  // sempre = quantidade × valor pago, calculado em confirmarCompra.
+  $("#mc-unidade-label").textContent = item.unidade || "";
+  $("#mc-quantidade").value = item.quantidade || "";
+  configurarCampoQuantidade($("#mc-quantidade"), item.unidade);
+  // Fracionável (kg, g, ml, l): o peso real só sai na balança do mercado, mas o total pago (o que
+  // sai no cupom) é o que a pessoa tem em mãos — por isso aqui "Valor pago" é o TOTAL da compra,
+  // não o preço por kg. O preço por kg é calculado (total ÷ quantidade) e é ELE que fica
+  // registrado no item, não o total digitado (ver confirmarCompra/atualizarLegendaValorTotalComprar).
+  // Unidade/caixa/dúzia: continua sendo o preço por unidade direto, como sempre foi.
   const fracionavel = unidadeAceitaFracao(item.unidade);
-  $("#campo-mc-quantidade").classList.toggle("hidden", !fracionavel);
-  if (fracionavel) {
-    $("#mc-unidade-label").textContent = item.unidade || "";
-    $("#mc-quantidade").value = item.quantidade || "";
-  }
-  // "Valor pago" é sempre o preço por unidade (R$/kg, R$/un...), nunca o total da linha — o
-  // total (subtotal) é sempre calculado como quantidade × esse valor, em confirmarCompra.
-  // Pré-preenche com o que já estava provisionado na lista enquanto busca a origem detalhada
-  // (cadastro, último comprado ou mais barato + local) pra completar a referência acima.
-  $("#rotulo-mc-valor").textContent = `Valor pago (por ${abreviarUnidade(item.unidade)}) *`;
-  $("#mc-valor").value = item.valorProvisionado ? formatarMoeda(item.valorProvisionado) : "";
+  $("#rotulo-mc-valor").textContent = fracionavel ? "Valor total pago *" : `Valor pago (por ${abreviarUnidade(item.unidade)}) *`;
+  // Pré-preenche com uma estimativa a partir do que já estava provisionado na lista (fracionável:
+  // preço por kg conhecido × quantidade atual do campo, como um chute inicial de total) enquanto
+  // busca a origem detalhada (cadastro, último comprado ou mais barato + local) pra completar a
+  // referência acima.
+  const quantidadeInicial = Number($("#mc-quantidade").value) || 0;
+  $("#mc-valor").value = item.valorProvisionado
+    ? formatarMoeda(fracionavel ? item.valorProvisionado * quantidadeInicial : item.valorProvisionado)
+    : "";
   atualizarDiferencaValorComprar();
   atualizarLegendaValorTotalComprar();
   // Sugere o local mais usado até alguém marcar o primeiro item da sessão; a partir daí, segue
@@ -2282,7 +2353,10 @@ async function abrirModalComprar(itemListaId) {
     return;
   }
   valorReferenciaModalComprar = origemValor.valor || 0;
-  $("#mc-valor").value = origemValor.valor ? formatarMoeda(origemValor.valor) : "";
+  const quantidadeAtual = Number($("#mc-quantidade").value) || 0;
+  $("#mc-valor").value = origemValor.valor
+    ? formatarMoeda(fracionavel ? origemValor.valor * quantidadeAtual : origemValor.valor)
+    : "";
   atualizarDiferencaValorComprar();
   atualizarLegendaValorTotalComprar();
   // Mesma flag azul usada no Detalhes/Histórico do item: mostra "Cadastro" quando o valor não tem
@@ -2298,23 +2372,36 @@ function fecharModalComprar() {
 }
 async function confirmarCompra() {
   const localId = $("#mc-local").value;
-  // "Valor pago" é sempre por unidade (mesma unidade do "R$/kg" mostrado no card) — o total da
-  // linha (subtotal) é sempre esse valor × a quantidade, nunca o valor digitado direto.
-  const valorPago = paraNumero($("#mc-valor").value);
-  if (!localId || valorPago <= 0) {
+  const valorDigitado = paraNumero($("#mc-valor").value);
+  if (!localId || valorDigitado <= 0) {
     mostrarMsg("#msg-comprar", "Selecione o local e informe o valor pago.", "erro");
     return;
   }
   const item = itensListaAtuais.find((i) => i.id === itemListaPendenteId);
   if (!item) return;
-  // Em unidades fracionáveis, a quantidade real (peso na balança) pode ter sido ajustada no
-  // campo "Quantidade comprada" — usa ela pro total em vez da quantidade só estimada da lista.
   const fracionavel = unidadeAceitaFracao(item.unidade);
-  const quantidade = fracionavel ? (Number($("#mc-quantidade").value) || item.quantidade || 0) : (item.quantidade || 0);
+  // A quantidade real comprada (peso na balança, ou mais/menos unidades que o planejado) pode ter
+  // sido ajustada no campo "Quantidade comprada" — usa ela pro total em vez da quantidade só
+  // estimada da lista. Não fracionável nunca aceita decimal, mesmo que algo escape do campo.
+  let quantidade = Number($("#mc-quantidade").value) || item.quantidade || 0;
+  if (!fracionavel) quantidade = Math.round(quantidade);
+  if (fracionavel && !(quantidade > 0)) {
+    mostrarMsg("#msg-comprar", "Informe a quantidade comprada.", "erro");
+    return;
+  }
+  // Fracionável: "Valor pago" é o TOTAL da compra (o que saiu no cupom/balança) — o preço por
+  // kg/g que fica registrado no item (valorPago, usado no histórico de preços e no "R$/kg" da
+  // linha) é esse total dividido pela quantidade pesada, não o valor digitado direto. O subtotal
+  // da linha continua sendo o total realmente pago, igual antes.
+  const valorPago = fracionavel ? Math.round((valorDigitado / quantidade) * 100) / 100 : valorDigitado;
+  const subtotal = fracionavel ? valorDigitado : quantidade * valorDigitado;
   ultimoLocalUsadoId = localId;
   await updateDoc(doc(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista", item.id), {
+    // Grava a quantidade real informada aqui (peso na balança, ou contagem ajustada) — sem isso a
+    // linha continuava mostrando a quantidade só estimada de quando o item foi adicionado (ex.:
+    // "1kg" mesmo tendo comprado 0,108kg de verdade).
     comprado: true, localCompraId: localId, valorPago, compradoPor: usuario.uid, compradoEm: hojeISO(),
-    subtotal: quantidade * valorPago,
+    quantidade, subtotal,
   });
   // Histórico de preços e estatísticas dos dashboards só são gravados na finalização da compra
   // (confirmarFinalizar), não aqui: até lá o check é só o estado "peguei no carrinho", podendo
@@ -2601,7 +2688,7 @@ async function renderCadastroItens() {
     .map((i, idx) => {
       const partes = [i.marca, i.descricao, i.descricaoUnidade].filter(Boolean);
       const detalhe = partes.map((p) => esc(p)).join(" · ");
-      return `<div class="item" data-id="${i.id}">
+      return `<div class="item item-catalogo" data-id="${i.id}">
       <div class="info">
         <div class="nome">${esc(i.nome)}</div>
         <div class="detalhe detalhe-truncado">${detalhe}</div>
@@ -2955,7 +3042,10 @@ function renderSugestoesItem(query) {
   });
 }
 async function abrirFormEditarItem(item) {
-  telaAnterior = "cadastro-itens";
+  // Não mexe em "telaAnterior" aqui: quem chamou essa função já deixou ela certa (a tela de
+  // detalhe do item preserva de onde veio — Cadastro > Itens ou a lista de compras — e sobrescrever
+  // sempre com "cadastro-itens" fazia o "Salvar" voltar pro catálogo mesmo editando a partir da
+  // lista de compras).
   listaOrigemNovoItem = null;
   $("#fi-id").value = item.id;
   $("#fi-nome").value = item.nome;
@@ -2981,6 +3071,43 @@ async function abrirFormEditarItem(item) {
   const travado = await itemTemCompraRegistrada(item.id);
   $("#fi-valor").disabled = travado;
   $("#fi-valor-aviso").classList.toggle("hidden", !travado);
+}
+// Depois de editar um item no cadastro (preço, descrição, marca, unidade, grupo...), atualiza
+// também as linhas já adicionadas a listas ainda pendentes (não finalizadas) — sem isso, a lista
+// de compras continuava mostrando os dados antigos, copiados pro itensLista no momento em que o
+// item foi adicionado e nunca mais atualizados (mesmo problema do valor, ver confirmarQuantidade).
+// Nome/marca/descrição/unidade/grupo são só informativos — sincroniza mesmo em item já comprado,
+// não tem "retrato histórico" nenhum a proteger aí. Preço é diferente: só sincroniza em item ainda
+// pendente, porque item comprado guarda o valor REALMENTE pago, que não deve mudar retroativamente
+// só porque o cadastro foi editado depois.
+async function sincronizarValorNasListasPendentes(itemId, dadosItem) {
+  const valorProvisionado = await valorProvisionadoParaItem({ id: itemId, valor: dadosItem.valor });
+  const camposDescritivos = {
+    nome: dadosItem.nome, marca: dadosItem.marca || null, descricao: dadosItem.descricao || null,
+    descricaoUnidade: dadosItem.descricaoUnidade || null, unidade: dadosItem.unidade, grupoNome: dadosItem.grupoNome || null,
+  };
+  const listasPendentes = listasAtuais.filter((l) => !l.finalizadaEm);
+  for (const lista of listasPendentes) {
+    const snap = await getDocs(query(
+      collection(bd, "espacos", espacoIdAtual, "listas", lista.id, "itensLista"),
+      where("itemId", "==", itemId)
+    ));
+    if (snap.empty) continue;
+    const lote = writeBatch(bd);
+    snap.docs.forEach((d) => {
+      const dadosLinha = d.data();
+      const atualizacao = { ...camposDescritivos };
+      if (!dadosLinha.comprado) {
+        const quantidade = dadosLinha.quantidade || 0;
+        atualizacao.valorProvisionado = valorProvisionado;
+        atualizacao.subtotal = quantidade * valorProvisionado;
+        atualizacao.subtotalProvisionado = quantidade * valorProvisionado;
+      }
+      lote.update(d.ref, atualizacao);
+    });
+    await lote.commit();
+    await recalcularTotaisLista(lista.id);
+  }
 }
 async function salvarItem() {
   const id = $("#fi-id").value;
@@ -3048,6 +3175,7 @@ async function salvarItem() {
         }
       }
       await updateDoc(doc(bd, "espacos", espacoIdAtual, "itens", id), dados);
+      await sincronizarValorNasListasPendentes(id, dados);
     } else {
       const refItem = await addDoc(collection(bd, "espacos", espacoIdAtual, "itens"), dados);
       await addDoc(collection(bd, "espacos", espacoIdAtual, "itens", refItem.id, "historicoPrecos"), {
@@ -3118,7 +3246,7 @@ function renderCadastroGrupos() {
     return;
   }
   container.innerHTML = lista
-    .map((g) => `<div class="item" data-id="${g.id}"><div class="info"><div class="nome">${esc(g.nome)}</div>${g.descricao ? `<div class="detalhe"><span>${esc(g.descricao)}</span></div>` : ""}</div></div>`)
+    .map((g) => `<div class="item item-cadastro" data-id="${g.id}"><div class="info"><div class="nome">${esc(g.nome)}</div>${g.descricao ? `<div class="detalhe"><span>${esc(g.descricao)}</span></div>` : ""}</div></div>`)
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarGrupo(gruposAtuais.find((g) => g.id === el.dataset.id));
@@ -3186,7 +3314,7 @@ function renderCadastroLocais() {
     return;
   }
   container.innerHTML = lista
-    .map((l) => `<div class="item" data-id="${l.id}"><div class="info"><div class="nome">${l.site ? `<button type="button" class="btn-site-atalho" data-site="${esc(l.site)}" aria-label="Abrir site">${ICONE_SITE}</button>` : ""}${esc(l.nome)}</div>${l.cidade || l.endereco ? `<div class="detalhe"><span>${esc(l.endereco || "")}</span><span>${esc(l.cidade || "")}</span></div>` : ""}</div></div>`)
+    .map((l) => `<div class="item item-cadastro" data-id="${l.id}"><div class="info"><div class="nome">${l.site ? `<button type="button" class="btn-site-atalho" data-site="${esc(l.site)}" aria-label="Abrir site">${ICONE_SITE}</button>` : ""}${esc(l.nome)}</div>${l.cidade || l.endereco ? `<div class="detalhe"><span>${esc(l.endereco || "")}</span><span>${esc(l.cidade || "")}</span></div>` : ""}</div></div>`)
     .join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarLocal(locaisAtuais.find((l) => l.id === el.dataset.id));
@@ -3320,7 +3448,7 @@ function renderCadastroFormas() {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhuma forma de pagamento encontrada." : "Nenhuma forma de pagamento cadastrada."}</div>`;
     return;
   }
-  container.innerHTML = lista.map((f) => `<div class="item" data-id="${f.id}"><div class="info"><div class="nome">${esc(f.nome)}</div></div></div>`).join("");
+  container.innerHTML = lista.map((f) => `<div class="item item-cadastro" data-id="${f.id}"><div class="info"><div class="nome">${esc(f.nome)}</div></div></div>`).join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarForma(formasAtuais.find((f) => f.id === el.dataset.id));
   });
@@ -3384,7 +3512,7 @@ function renderCadastroUnidades() {
     container.innerHTML = `<div class="vazio">${termo ? "Nenhuma unidade encontrada." : "Nenhuma unidade de medida cadastrada."}</div>`;
     return;
   }
-  container.innerHTML = lista.map((u) => `<div class="item" data-id="${u.id}"><div class="info"><div class="nome">${esc(u.nome)}</div></div></div>`).join("");
+  container.innerHTML = lista.map((u) => `<div class="item item-cadastro" data-id="${u.id}"><div class="info"><div class="nome">${esc(u.nome)}</div></div></div>`).join("");
   container.querySelectorAll(".item").forEach((el) => {
     el.onclick = () => abrirFormEditarUnidade(unidadesAtuais.find((u) => u.id === el.dataset.id));
   });
@@ -3944,6 +4072,7 @@ function ligarEventos() {
   });
   $("#ld-item-nome").addEventListener("blur", () => setTimeout(() => $("#ld-item-sugestoes").classList.add("hidden"), 150));
   $("#ld-quantidade").addEventListener("input", atualizarValorAdicionarItem);
+  $("#qtd-valor").addEventListener("input", atualizarValorAlterarQuantidade);
   $("#btn-adicionar-item-lista").onclick = adicionarItemNaLista;
   $("#btn-cancelar-add-item-lista").onclick = fecharFormAdicionarItem;
   $("#btn-abrir-form-add-item").onclick = () => {
@@ -4083,8 +4212,8 @@ function ligarEventos() {
   });
   $("#mc-quantidade").addEventListener("input", atualizarLegendaValorTotalComprar);
   $("#fin-desconto").addEventListener("input", atualizarValorFinalFinalizar);
-  ["#ld-quantidade"].forEach(bloquearCaracteresInvalidosNumero);
-  ["#ld-quantidade", "#qtd-valor", "#env-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
+  ["#ld-quantidade", "#mc-quantidade"].forEach(bloquearCaracteresInvalidosNumero);
+  ["#ld-quantidade", "#qtd-valor", "#env-quantidade", "#mc-quantidade"].forEach(bloquearDecimalSeNaoFracionavel);
   // Botões "−"/"+" dos campos de quantidade: sempre andam de 1 em 1 (mesmo em unidade
   // fracionável, ex.: kg) — decimais só entram digitando manualmente no campo. Um passo por
   // toque, sem o spinner nativo repetindo incrementos sozinho em telas de toque.
