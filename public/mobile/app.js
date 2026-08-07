@@ -274,7 +274,7 @@ const ICONE_LOCAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
 const ICONE_FECHAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
 // Duas setas em círculo (trocar/substituir) — usado no botão discreto de trocar item da lista.
-const ICONE_TROCAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+const ICONE_TROCAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
 /* ---------- estado ---------- */
 let auth = null, bd = null, usuario = null;
@@ -1227,7 +1227,14 @@ function renderCarrosselListas() {
   }
   // Cada lista é filtrada pela data que faz mais sentido pra ela: "finalizadaEm" (quando a
   // compra de fato aconteceu) se já tiver sido finalizada, senão "criadoEm" (ainda em andamento).
-  const doMes = listasAtuais.filter((l) => mesAnoDoTimestamp(l.finalizadaEm ?? l.criadoEm) === filtroMesAnoListas);
+  // Lista recém-criada: o primeiro snapshot local (antes do servidor confirmar o serverTimestamp)
+  // chega com criadoEm ainda null, e mesAnoDoTimestamp(null) não bate com nenhum mês — sem esse
+  // fallback pro mês atual, a lista some da tela por alguns instantes (ou mais, em conexão ruim)
+  // logo depois de criada, até o timestamp real chegar num snapshot seguinte.
+  const doMes = listasAtuais.filter((l) => {
+    const referencia = l.finalizadaEm ?? l.criadoEm;
+    return referencia ? mesAnoDoTimestamp(referencia) === filtroMesAnoListas : filtroMesAnoListas === mesAnoAtual();
+  });
   if (doMes.length === 0) {
     container.innerHTML = `<div class="vazio">Nenhuma lista nesse mês.</div>`;
     corrigirLimitesScrollIOS(container.closest("main"));
@@ -2001,26 +2008,33 @@ function fecharFormAdicionarItem() {
 }
 
 async function adicionarItemNaLista() {
-  const itemId = $("#ld-item-id").value;
-  const item = itensAtuais.find((i) => i.id === itemId);
-  if (!item) {
-    exibirSucesso(itensAtuais.length === 0 ? "Cadastre um item antes de adicionar à lista." : "Digite o nome e selecione um item da lista de sugestões.");
-    return;
-  }
-  // Não deixa duplicar o mesmo item na lista — se já estiver lá, manda direto pra edição de
-  // quantidade dele em vez de criar uma segunda linha do mesmo produto.
-  const jaNaLista = itensListaAtuais.find((i) => i.itemId === itemId);
-  if (jaNaLista) {
-    fecharFormAdicionarItem();
-    exibirSucesso(`"${item.nome}" já está nesta lista — altere a quantidade em vez de adicionar de novo.`, 3000);
-    abrirModalQuantidade(jaNaLista.id);
-    return;
-  }
-  // Campo nativo type="number": .value já vem com ponto decimal (não vírgula), então lê direto
-  // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
-  let quantidade = Number($("#ld-quantidade").value) || 1;
-  if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
+  // Trava contra clique duplo/repetido enquanto o addDoc abaixo ainda está em voo: sem isso, dois
+  // cliques no mesmo instante (ex.: usuário tocando de novo por achar que travou) passam os dois
+  // pela checagem de "já está na lista" antes de o onSnapshot atualizar itensListaAtuais, e cada
+  // um cria sua própria linha duplicada do mesmo item.
+  const btn = $("#btn-adicionar-item-lista");
+  if (btn.disabled) return;
+  btn.disabled = true;
   try {
+    const itemId = $("#ld-item-id").value;
+    const item = itensAtuais.find((i) => i.id === itemId);
+    if (!item) {
+      exibirSucesso(itensAtuais.length === 0 ? "Cadastre um item antes de adicionar à lista." : "Digite o nome e selecione um item da lista de sugestões.");
+      return;
+    }
+    // Não deixa duplicar o mesmo item na lista — se já estiver lá, manda direto pra edição de
+    // quantidade dele em vez de criar uma segunda linha do mesmo produto.
+    const jaNaLista = itensListaAtuais.find((i) => i.itemId === itemId);
+    if (jaNaLista) {
+      fecharFormAdicionarItem();
+      exibirSucesso(`"${item.nome}" já está nesta lista — altere a quantidade em vez de adicionar de novo.`, 3000);
+      abrirModalQuantidade(jaNaLista.id);
+      return;
+    }
+    // Campo nativo type="number": .value já vem com ponto decimal (não vírgula), então lê direto
+    // em vez de usar paraNumero (que espera o formato "R$ 1.234,56" dos campos de valor).
+    let quantidade = Number($("#ld-quantidade").value) || 1;
+    if (!unidadeAceitaFracao(item.unidade)) quantidade = Math.round(quantidade);
     const valorProvisionado = await valorProvisionadoParaItem(item);
     const adicionadoPorNome = nomeExibicaoUsuario();
     await addDoc(collection(bd, "espacos", espacoIdAtual, "listas", listaAbertaId, "itensLista"), {
@@ -2041,6 +2055,8 @@ async function adicionarItemNaLista() {
     exibirSucesso("Item adicionado à lista!");
   } catch {
     exibirSucesso("Não foi possível adicionar o item. Confira a conexão e tente de novo.", 3000);
+  } finally {
+    btn.disabled = false;
   }
 }
 

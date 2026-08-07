@@ -1789,8 +1789,8 @@ main::-webkit-scrollbar {
   color: #06210f;
 }
 .btn-trocar-item {
-  width: 20px;
-  height: 20px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--bg-soft);
@@ -1807,13 +1807,13 @@ main::-webkit-scrollbar {
 }
 .btn-excluir-linha {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 20px;
 }
 .btn-excluir-linha:active {
   background: var(--bg-soft);
