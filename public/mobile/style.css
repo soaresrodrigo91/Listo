@@ -922,7 +922,7 @@ textarea {
   padding: 12px 0;
 }
 .detalhe-valor-aviso {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   opacity: 0.85;
   text-align: left;
@@ -1643,6 +1643,49 @@ main::-webkit-scrollbar {
 .item.item-catalogo .valor {
   flex-shrink: 0;
 }
+/* Relatórios (top 20 mais caros): posição numerada em vez do checkbox/botão das outras variantes
+   de ".item" — precisa da própria coluna, mais estreita que o valor no fim da linha. Alinha no
+   topo (não centralizado) porque o item pode crescer com várias linhas de local embaixo, quando
+   comprado em mais de um lugar no mês — centralizar deixaria a posição/valor "flutuando" no meio
+   de um card alto. */
+.item.item-ranking {
+  grid-template-columns: 28px 1fr auto;
+  align-items: start;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+.item.item-ranking .valor,
+.item.item-ranking .ranking-posicao {
+  padding-top: 2px;
+}
+.item.item-ranking .valor {
+  flex-shrink: 0;
+}
+.item.item-ranking .detalhe.detalhe-truncado {
+  margin-top: 5px;
+}
+/* Mais espaço tanto antes da linha tracejada (afasta da descrição acima) quanto depois dela
+   (afasta o nome do local, que ficava colado bem em cima do traço). */
+.item.item-ranking .item-rodape {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.ranking-posicao {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.ranking-medalha {
+  font-size: 22px;
+  line-height: 1;
+}
+.ranking-numero {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
 /* Nome + valor total na mesma linha (hierarquia principal do item); quantidade, detalhe e valor
    unitário formam uma segunda linha só deles logo abaixo — antes tudo isso brigava lado a lado
    numa única linha, obrigando cada pedaço a ficar minúsculo pra caber. */
@@ -1810,13 +1853,14 @@ main::-webkit-scrollbar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   display: grid;
   place-items: center;
-  color: var(--muted);
-  font-size: 20px;
+  color: var(--danger);
 }
 .btn-excluir-linha:active {
-  background: var(--bg-soft);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
 }
 .btn-enviar-lista {
   flex-shrink: 0;

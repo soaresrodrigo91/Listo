@@ -275,6 +275,9 @@ const ICONE_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const ICONE_FECHAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
 // Duas setas em círculo (trocar/substituir) — usado no botão discreto de trocar item da lista.
 const ICONE_TROCAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+// X do mesmo peso/tamanho do ícone de trocar (em vez do caractere "✕", que renderiza fino e
+// pequeno demais perto do SVG do botão vizinho) — usado no botão de excluir item da lista.
+const ICONE_EXCLUIR_ITEM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
 
 /* ---------- estado ---------- */
 let auth = null, bd = null, usuario = null;
@@ -1084,13 +1087,18 @@ function renderRankingItensPorQuantidade(mapaQuantidade) {
 }
 
 /* ---------- carrossel de listas ---------- */
-// Filtro de mês/ano da tela "Listas de Compras" — sempre abre no mês atual (resetado em
-// irParaTela) e nunca persiste entre visitas à tela. Um botão único "Agosto 2026" (em vez de dois
-// <select>) abre um seletor próprio de mês/ano (sem dias) — o <input type="month"> nativo tem
-// suporte inconsistente entre navegadores (Firefox, por exemplo, não implementa o picker — cai
-// num texto simples onde não dá pra trocar o ano direito).
+// Filtro de mês/ano das telas "Listas de Compras" e "Relatórios" — sempre abre no mês atual
+// (resetado em irParaTela) e nunca persiste entre visitas à tela. Um botão único "Agosto 2026" (em
+// vez de dois <select>) abre um seletor próprio de mês/ano (sem dias) — o <input type="month">
+// nativo tem suporte inconsistente entre navegadores (Firefox, por exemplo, não implementa o
+// picker — cai num texto simples onde não dá pra trocar o ano direito).
+// As duas telas compartilham o mesmo overlay/grade (só existe uma cópia no DOM) mas guardam o mês
+// escolhido cada uma no seu próprio filtro — contextoSeletorMesAno diz qual delas "é dona" do
+// overlay enquanto ele está aberto, pra saber onde ler/gravar o valor e qual tela re-renderizar.
 const NOMES_MESES_FILTRO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 let filtroMesAnoListas = mesAnoAtual();
+let filtroMesAnoRelatorios = mesAnoAtual();
+let contextoSeletorMesAno = "listas";
 // Ano sendo navegado DENTRO do seletor aberto — separado do filtro aplicado, pra passear entre
 // anos no picker sem mudar a lista mostrada por trás até escolher um mês de fato.
 let anoExibidoSeletorMesAno = new Date().getFullYear();
@@ -1099,20 +1107,30 @@ let anoExibidoSeletorMesAno = new Date().getFullYear();
 let modoSeletorAno = false;
 let anoBaseSeletorAno = 0;
 const ANOS_POR_PAGINA_SELETOR = 12;
-function atualizarRotuloMesAnoListas() {
-  const [ano, mes] = filtroMesAnoListas.split("-");
-  const el = $("#rotulo-mes-ano-listas");
+function filtroMesAnoDoContexto(contexto) {
+  return contexto === "relatorios" ? filtroMesAnoRelatorios : filtroMesAnoListas;
+}
+function atualizarRotuloMesAno(contexto) {
+  const [ano, mes] = filtroMesAnoDoContexto(contexto).split("-");
+  const el = $(contexto === "relatorios" ? "#rotulo-mes-ano-relatorios" : "#rotulo-mes-ano-listas");
   if (el) el.textContent = `${NOMES_MESES_FILTRO[Number(mes) - 1]} ${ano}`;
 }
 function aplicarFiltroMesAtualListas() {
   filtroMesAnoListas = mesAnoAtual();
-  atualizarRotuloMesAnoListas();
+  atualizarRotuloMesAno("listas");
 }
-function escolherMesAnoListas(mes, ano) {
-  filtroMesAnoListas = `${ano}-${String(mes).padStart(2, "0")}`;
-  atualizarRotuloMesAnoListas();
+function aplicarFiltroMesAtualRelatorios() {
+  filtroMesAnoRelatorios = mesAnoAtual();
+  atualizarRotuloMesAno("relatorios");
+}
+function escolherMesAno(mes, ano) {
+  const valor = `${ano}-${String(mes).padStart(2, "0")}`;
+  if (contextoSeletorMesAno === "relatorios") filtroMesAnoRelatorios = valor;
+  else filtroMesAnoListas = valor;
+  atualizarRotuloMesAno(contextoSeletorMesAno);
   fecharSeletorMesAno();
-  renderCarrosselListas();
+  if (contextoSeletorMesAno === "relatorios") renderRelatorios();
+  else renderCarrosselListas();
 }
 function alternarModoAnoSeletor() {
   modoSeletorAno = !modoSeletorAno;
@@ -1144,7 +1162,7 @@ function renderGradeSeletorMesAno() {
     return;
   }
   $("#seletor-mes-ano-ano-exibido").textContent = String(anoExibidoSeletorMesAno);
-  const [anoSelecionado, mesSelecionado] = filtroMesAnoListas.split("-").map(Number);
+  const [anoSelecionado, mesSelecionado] = filtroMesAnoDoContexto(contextoSeletorMesAno).split("-").map(Number);
   $("#seletor-mes-ano-grade").innerHTML = NOMES_MESES_FILTRO.map((nome, idx) => {
     const mes = idx + 1;
     const selecionado = anoExibidoSeletorMesAno === anoSelecionado && mes === mesSelecionado;
@@ -1153,11 +1171,12 @@ function renderGradeSeletorMesAno() {
     return `<button type="button" class="seletor-mes-botao${classe}" data-mes="${mes}">${nome.slice(0, 3)}</button>`;
   }).join("");
   $("#seletor-mes-ano-grade").querySelectorAll(".seletor-mes-botao").forEach((btn) => {
-    btn.onclick = () => escolherMesAnoListas(Number(btn.dataset.mes), anoExibidoSeletorMesAno);
+    btn.onclick = () => escolherMesAno(Number(btn.dataset.mes), anoExibidoSeletorMesAno);
   });
 }
-function abrirSeletorMesAno() {
-  anoExibidoSeletorMesAno = Number(filtroMesAnoListas.split("-")[0]);
+function abrirSeletorMesAno(contexto) {
+  contextoSeletorMesAno = contexto;
+  anoExibidoSeletorMesAno = Number(filtroMesAnoDoContexto(contexto).split("-")[0]);
   modoSeletorAno = false;
   renderGradeSeletorMesAno();
   $("#overlay-seletor-mes-ano").classList.remove("hidden");
@@ -1165,6 +1184,143 @@ function abrirSeletorMesAno() {
 function fecharSeletorMesAno() {
   $("#overlay-seletor-mes-ano").classList.add("hidden");
 }
+
+/* ---------- relatórios ---------- */
+// null em ambos = "Todos" (mesmo padrão dos outros filtros por chip do app). Grupo guarda o NOME
+// (grupoNome já é gravado direto como texto no itensLista, sem id próprio); Local guarda o ID
+// (localCompraId referencia locaisAtuais, que pode ser renomeado sem perder a referência antiga).
+let filtroGrupoRelatorios = null;
+let filtroLocalRelatorios = null;
+// Evita que uma resposta lenta de uma busca antiga (mês/filtro trocado enquanto ainda carregava)
+// sobrescreva por cima do resultado mais novo — mesma ideia do dashboardRenderToken da Início.
+let relatorioRenderToken = 0;
+function renderChipsComId(seletorContainer, opcoes, valorAtivo, aoSelecionar) {
+  const container = $(seletorContainer);
+  if (!opcoes.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML =
+    `<button type="button" class="chip ${!valorAtivo ? "ativo" : ""}" data-valor="">Todos</button>` +
+    opcoes.map((o) => `<button type="button" class="chip ${o.id === valorAtivo ? "ativo" : ""}" data-valor="${esc(o.id)}">${esc(o.nome)}</button>`).join("");
+  container.querySelectorAll(".chip").forEach((btn) => {
+    btn.onclick = () => aoSelecionar(btn.dataset.valor || null);
+  });
+}
+// Medalha (grande) sozinha nas 3 primeiras posições — já identifica o pódio sem precisar do
+// número junto; do 4º em diante, sem medalha, mostra o número ordinal normal.
+function marcadorPosicaoRanking(idx) {
+  const medalha = ["🥇", "🥈", "🥉"][idx];
+  if (medalha) return `<span class="ranking-medalha">${medalha}</span>`;
+  return `<span class="ranking-numero">${idx + 1}º</span>`;
+}
+// Top 20 por valor REALMENTE PAGO (do mais caro ao mais barato) das compras do mês/filtro
+// selecionado, um item por linha — se o mesmo item foi comprado mais de uma vez no período (em
+// datas, locais ou preços diferentes), as ocorrências são somadas numa linha só (quantidade e
+// valor total), em vez de aparecer duplicado no ranking. "Valor pago" aqui é sempre o subtotal de
+// cada ocorrência (o que realmente saiu do bolso), nunca o "valorPago" bruto do itensLista — esse
+// campo guarda o preço por KG/unidade nos itens fracionáveis (pesados), não o total da compra.
+// Varre TODAS as listas (não só as do mês pelo criadoEm/finalizadaEm delas), porque uma lista
+// permanente pode ter itens comprados em qualquer mês, independente de quando foi criada — quem
+// decide o mês de cada ocorrência é o compradoEm do próprio item.
+async function computarTopValoresRelatorio(mesAno, grupoFiltro, localIdFiltro) {
+  const snaps = await Promise.all(
+    listasAtuais.map((l) => getDocs(collection(bd, "espacos", espacoIdAtual, "listas", l.id, "itensLista")))
+  );
+  const porItem = new Map();
+  snaps.forEach((snap) => {
+    snap.docs.forEach((d) => {
+      const i = d.data();
+      if (!i.comprado || !(i.valorPago > 0)) return;
+      // compradoEm do itensLista é gravado como hojeISO() ("YYYY-MM-DD"), não serverTimestamp —
+      // por isso o corte de mês aqui é uma fatia de string, não mesAnoDoTimestamp.
+      if ((i.compradoEm || "").slice(0, 7) !== mesAno) return;
+      if (grupoFiltro && (i.grupoNome || null) !== grupoFiltro) return;
+      if (localIdFiltro && i.localCompraId !== localIdFiltro) return;
+      if (!porItem.has(i.itemId)) {
+        porItem.set(i.itemId, {
+          itemId: i.itemId, nome: i.nome, marca: i.marca, descricao: i.descricao,
+          descricaoUnidade: i.descricaoUnidade, unidade: i.unidade, grupoNome: i.grupoNome,
+          quantidadeTotal: 0, valorTotal: 0, locaisIds: new Set(),
+        });
+      }
+      const acc = porItem.get(i.itemId);
+      acc.quantidadeTotal += i.quantidade || 0;
+      acc.valorTotal += i.subtotal || 0;
+      if (i.localCompraId) acc.locaisIds.add(i.localCompraId);
+    });
+  });
+  return [...porItem.values()].sort((a, b) => b.valorTotal - a.valorTotal).slice(0, 20);
+}
+async function renderRelatorios() {
+  renderChips("#filtros-relatorios-grupo", gruposAtuais.map((g) => g.nome), filtroGrupoRelatorios, (v) => {
+    filtroGrupoRelatorios = v;
+    renderRelatorios();
+  });
+  renderChipsComId("#filtros-relatorios-local", locaisAtuais.map((l) => ({ id: l.id, nome: l.nome })), filtroLocalRelatorios, (v) => {
+    filtroLocalRelatorios = v;
+    renderRelatorios();
+  });
+
+  const meuToken = ++relatorioRenderToken;
+  const itens = await computarTopValoresRelatorio(filtroMesAnoRelatorios, filtroGrupoRelatorios, filtroLocalRelatorios);
+  if (meuToken !== relatorioRenderToken) return;
+
+  // Soma só os itens realmente listados aqui (até 20, já com os filtros de mês/grupo/local
+  // aplicados) — mesmo canto/estilo do "Total do período" da tela Listas de Compras.
+  $("#total-relatorios-valor").textContent = formatarMoeda(itens.reduce((s, g) => s + g.valorTotal, 0));
+
+  const container = $("#lista-relatorio-top-valores");
+  if (itens.length === 0) {
+    container.innerHTML = `<div class="vazio">Nenhuma compra encontrada com esses filtros neste mês.</div>`;
+    return;
+  }
+  container.innerHTML = itens
+    .map((g, idx) => {
+      // Itens adicionados antes de marca/descrição existirem no itensLista caem no cadastro atual
+      // — mesmo fallback usado na tela da lista aberta (ver renderListaDetalhe).
+      const catalogo = itensAtuais.find((it) => it.id === g.itemId);
+      const partes = [
+        g.marca ?? catalogo?.marca,
+        g.descricao ?? catalogo?.descricao,
+        g.descricaoUnidade ?? catalogo?.descricaoUnidade,
+        g.grupoNome,
+      ].filter(Boolean);
+      const detalhe = partes.map((p) => esc(p)).join(" · ");
+      const quantidadeFormatada = formatarQuantidadeLista({ quantidade: g.quantidadeTotal, unidade: g.unidade });
+      // Um <div class="item-rodape"> a cada 2 locais (os 2 primeiros juntos na mesma linha, os
+      // próximos 2 na linha de baixo, e assim por diante), separado por linha tracejada — mesmo
+      // componente já usado no rodapé da linha da lista de compras (ver renderListaDetalhe).
+      const nomesLocais = [...g.locaisIds].map((id) => locaisAtuais.find((l) => l.id === id)?.nome).filter(Boolean);
+      let linhasLocais = "";
+      for (let i = 0; i < nomesLocais.length; i += 2) {
+        // Ícone de local repetido em cada nome (não só uma vez pra linha inteira) — quando os 2
+        // ficam juntos na mesma linha, cada um continua com sua própria marcação.
+        const nomesDaLinha = nomesLocais.slice(i, i + 2).map((nome) => `${ICONE_LOCAL}${esc(nome)}`).join(" · ");
+        linhasLocais += `<div class="item-rodape"><span class="item-rodape-meta">${nomesDaLinha}</span></div>`;
+      }
+      return `<div class="item item-ranking" data-id="${g.itemId}">
+        <span class="ranking-posicao">${marcadorPosicaoRanking(idx)}</span>
+        <div class="info">
+          <div class="item-linha-principal">
+            <span class="nome">${esc(g.nome)}</span>
+            <span class="badge-mini">${esc(quantidadeFormatada)}</span>
+          </div>
+          ${detalhe ? `<div class="detalhe detalhe-truncado">${detalhe}</div>` : ""}
+          ${linhasLocais}
+        </div>
+        <span class="valor">${formatarMoeda(g.valorTotal)}</span>
+      </div>`;
+    })
+    .join("");
+  // Abre o cadastro do item ao tocar na linha — mesmo padrão de "Cadastro > Itens" (ver
+  // renderCadastroItens), mas com origemTela "relatorios": ao voltar, isso faz o botão de
+  // voltar reabrir o próprio Relatório em vez de cair na tela de Itens.
+  container.querySelectorAll(".item-ranking").forEach((el) => {
+    el.onclick = () => abrirItemDetalhe(itensAtuais.find((it) => it.id === el.dataset.id), "relatorios");
+  });
+}
+
 // Soma o valor REAL (já com desconto, pagamentos batidos) só das compras finalizadas dentro do
 // mês/ano filtrado — listas ainda pendentes não têm "valorTotalPago" de verdade, então não
 // entram nessa conta (diferente do card individual, que mostra o provisionado pra elas).
@@ -1555,7 +1711,7 @@ function listaAbertaAtual() {
 function voltarParaTelaAnterior() {
   const lista = telaAnterior === "lista-detalhe" ? listaAbertaAtual() : null;
   if (lista) abrirListaDetalhe(lista);
-  else irParaTela(telaAnterior);
+  else irParaTela(telaAnterior, { manterEstado: telaAnterior === "relatorios" });
 }
 
 // "Convidar Amigo" no menu: usa o share sheet nativo do celular quando disponível (deixa a
@@ -1831,7 +1987,7 @@ function renderListaDetalhe() {
           <span class="item-rodape-meta">${metaPartes.join(" · ")}</span>
           <div class="item-rodape-acoes">
             <button class="btn-trocar-item" data-acao="trocar" title="Trocar item" aria-label="Trocar item" ${i.comprado || lista.finalizadaEm ? "disabled" : ""}>${ICONE_TROCAR}</button>
-            ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir">✕</button>`}
+            ${lista.finalizadaEm ? "" : `<button class="btn-excluir-linha" data-acao="excluir" title="Excluir item" aria-label="Excluir item">${ICONE_EXCLUIR_ITEM}</button>`}
           </div>
         </div>
       </div>`;
@@ -3806,12 +3962,12 @@ async function recusarConvite(convite) {
 }
 
 /* ---------- navegação ---------- */
-const TELAS_PRINCIPAIS = ["inicio", "listas", "cadastro-itens", "cadastro-grupos", "cadastro-locais", "cadastro-formas", "cadastro-unidades", "compartilhadas", "configuracoes", "seguranca"];
+const TELAS_PRINCIPAIS = ["inicio", "listas", "relatorios", "cadastro-itens", "cadastro-grupos", "cadastro-locais", "cadastro-formas", "cadastro-unidades", "compartilhadas", "configuracoes", "seguranca"];
 const TELAS_CHEIAS = ["lista-detalhe", "item-detalhe", "form-item", "form-grupo", "form-local", "form-forma", "form-unidade", "form-lista", "perfil", "notificacoes"];
 const TODAS_AS_TELAS = [...TELAS_PRINCIPAIS, ...TELAS_CHEIAS];
 
 const TITULOS_TELA_PRINCIPAL = {
-  inicio: "Início", listas: "Listas de Compras", "cadastro-itens": "Itens", "cadastro-grupos": "Grupos",
+  inicio: "Início", listas: "Listas de Compras", relatorios: "Relatório", "cadastro-itens": "Itens", "cadastro-grupos": "Grupos",
   "cadastro-locais": "Locais", "cadastro-formas": "Formas de Pagamento", "cadastro-unidades": "Unidades de Medida",
   compartilhadas: "Participantes", configuracoes: "Configurações", seguranca: "Segurança",
 };
@@ -3830,7 +3986,12 @@ function reativarScrollTela(nome) {
     main.style.overflow = "";
   });
 }
-function irParaTela(nome) {
+// manterEstado: usado só ao voltar do cadastro de um item aberto a partir do próprio Relatório
+// (ver voltarParaTelaAnterior) — nesse caso a tela deve reaparecer exatamente como o usuário
+// deixou (mesmo mês, mesmo grupo/local), não resetada, já que ele só foi conferir um item e volta
+// pra continuar olhando o mesmo ranking. Fora esse caso, entrar em "Listas"/"Relatórios" (pelo
+// menu, por exemplo) sempre reseta pro estado padrão — ver comentário abaixo.
+function irParaTela(nome, { manterEstado = false } = {}) {
   TODAS_AS_TELAS.forEach((t) => $(`#tela-${t}`).classList.toggle("hidden", t !== nome));
   document.querySelectorAll(".menu-item").forEach((item) => item.classList.toggle("ativa", item.dataset.tela === nome));
   $("#topbar-titulo").textContent = TITULOS_TELA_PRINCIPAL[nome] ?? "";
@@ -3839,11 +4000,19 @@ function irParaTela(nome) {
   // itens mude — precisa recalcular também ao simplesmente abrir a tela (senão mostra o valor de
   // quando a tela foi renderizada pela última vez, não o atual).
   if (nome === "cadastro-itens") renderCadastroItens();
-  // O filtro de mês da tela "Listas de Compras" nunca persiste de uma visita pra outra — sempre
-  // volta a abrir no mês atual.
-  if (nome === "listas") {
+  // O filtro de mês das telas "Listas de Compras" e "Relatórios" nunca persiste de uma visita pra
+  // outra — sempre volta a abrir no mês atual.
+  if (nome === "listas" && !manterEstado) {
     aplicarFiltroMesAtualListas();
     renderCarrosselListas();
+  }
+  if (nome === "relatorios" && !manterEstado) {
+    aplicarFiltroMesAtualRelatorios();
+    // Grupo e Local também nunca persistem de uma visita pra outra — mesma regra do mês, sempre
+    // volta a abrir com os dois filtros em "Todos".
+    filtroGrupoRelatorios = null;
+    filtroLocalRelatorios = null;
+    renderRelatorios();
   }
   reativarScrollTela(nome);
 }
@@ -4032,7 +4201,8 @@ function ligarEventos() {
   });
   $("#fab-listas").onclick = abrirFormNovaLista;
   aplicarFiltroMesAtualListas();
-  $("#btn-abrir-seletor-mes-ano").onclick = abrirSeletorMesAno;
+  $("#btn-abrir-seletor-mes-ano").onclick = () => abrirSeletorMesAno("listas");
+  $("#btn-abrir-seletor-mes-ano-relatorios").onclick = () => abrirSeletorMesAno("relatorios");
   $("#overlay-seletor-mes-ano").addEventListener("click", (e) => { if (e.target.id === "overlay-seletor-mes-ano") fecharSeletorMesAno(); });
   $("#btn-seletor-ano-anterior").onclick = () => {
     if (modoSeletorAno) anoBaseSeletorAno -= ANOS_POR_PAGINA_SELETOR;
@@ -4047,7 +4217,7 @@ function ligarEventos() {
   $("#seletor-mes-ano-ano-exibido").onclick = alternarModoAnoSeletor;
   $("#btn-seletor-mes-ano-este-mes").onclick = () => {
     const agora = new Date();
-    escolherMesAnoListas(agora.getMonth() + 1, agora.getFullYear());
+    escolherMesAno(agora.getMonth() + 1, agora.getFullYear());
   };
   $("#fab-cadastro-itens").onclick = abrirFormNovoItem;
   $("#fab-cadastro-grupos").onclick = abrirFormNovoGrupo;
